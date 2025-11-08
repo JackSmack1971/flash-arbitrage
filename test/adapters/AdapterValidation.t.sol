@@ -2,6 +2,7 @@
 pragma solidity ^0.8.21;
 
 import "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/UniswapV2Adapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -35,9 +36,25 @@ contract AdapterValidationTest is Test {
         owner = address(this);
         attacker = makeAddr("attacker");
 
-        // Deploy contracts
-        flashArb = new FlashArbMainnetReady();
-        flashArb.initialize();
+        // Mock AAVE provider at expected address
+        address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
+        address mockLendingPool = makeAddr("mockLendingPool");
+
+        // Deploy mock provider bytecode
+        vm.etch(aaveProvider, hex"00");
+        vm.mockCall(
+            aaveProvider,
+            abi.encodeWithSignature("getLendingPool()"),
+            abi.encode(mockLendingPool)
+        );
+
+        // Deploy implementation
+        FlashArbMainnetReady implementation = new FlashArbMainnetReady();
+
+        // Deploy proxy with initialization
+        bytes memory initCall = abi.encodeCall(FlashArbMainnetReady.initialize, ());
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
+        flashArb = FlashArbMainnetReady(payable(address(proxy)));
 
         legitimateAdapter = new UniswapV2Adapter();
     }

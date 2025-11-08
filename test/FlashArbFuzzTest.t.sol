@@ -23,6 +23,16 @@ contract FlashArbFuzzTest is Test {
     function setUp() public {
         vm.startPrank(owner);
 
+        // Mock AAVE provider at expected address
+        address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
+        address mockLendingPoolAddr = makeAddr("mockLendingPool");
+        vm.etch(aaveProvider, hex"00");
+        vm.mockCall(
+            aaveProvider,
+            abi.encodeWithSignature("getLendingPool()"),
+            abi.encode(mockLendingPoolAddr)
+        );
+
         // Deploy mocks
         tokenA = new MockERC20("Token A", "TKA", 18);
         tokenB = new MockERC20("Token B", "TKB", 18);
