@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import "forge-std/Test.sol";
 import {FlashArbMainnetReady} from "../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter} from "../src/UniswapV2Adapter.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockLendingPool} from "../mocks/MockLendingPool.sol";
 import {MockRouter} from "../mocks/MockRouter.sol";
 
-contract FlashArbEchidnaTest {
+contract FlashArbEchidnaTest is Test {
     FlashArbMainnetReady arb;
     UniswapV2Adapter adapter;
     MockERC20 tokenA;
