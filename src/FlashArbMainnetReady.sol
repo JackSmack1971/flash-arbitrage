@@ -374,6 +374,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
             out1 = amounts1[amounts1.length - 1];
         }
 
+        // Security: Enforce slippage limit on first swap
+        uint256 minOut1 = _calculateMinOutput(_amount, maxSlippageBps);
+        if (out1 < minOut1) {
+            revert SlippageExceeded(minOut1, out1, maxSlippageBps);
+        }
+
         address intermediate = path1[path1.length - 1];
         require(path2[0] == intermediate, "path2 must start with intermediate token");
 
@@ -412,11 +418,13 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
             out2 = amounts2[amounts2.length - 1];
         }
 
-        // Security: Enforce on-chain slippage limits
-        // Calculate minimum acceptable output based on maxSlippageBps
-        // For example: if maxSlippageBps = 200 (2%), minimum output = _amount * 9800 / 10000
-        uint256 minAcceptableOutput = (_amount * (10000 - maxSlippageBps)) / 10000;
-        require(out2 >= minAcceptableOutput, "slippage-exceeds-max");
+        // Security: Enforce slippage limit on second swap
+        // Note: On-chain slippage enforcement provides stronger guarantees than off-chain
+        // validation, as it cannot be bypassed by front-running or stale price data
+        uint256 minOut2 = _calculateMinOutput(out1, maxSlippageBps);
+        if (out2 < minOut2) {
+            revert SlippageExceeded(minOut2, out2, maxSlippageBps);
+        }
 
         uint256 totalDebt = _amount + _fee;
         uint256 finalBalance = IERC20(_reserve).balanceOf(address(this));
