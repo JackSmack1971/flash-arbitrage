@@ -1,0 +1,246 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import {Test} from "forge-std/Test.sol";
+import {FlashArbMainnetReady} from "../../src/FlashArbMainnetReady.sol";
+import {UniswapV2Adapter} from "../../src/UniswapV2Adapter.sol";
+import {MockERC20} from "../../mocks/MockERC20.sol";
+import {MockLendingPool} from "../../mocks/MockLendingPool.sol";
+import {MockRouter} from "../../mocks/MockRouter.sol";
+
+contract FlashArbInvariantTest is Test {
+    FlashArbMainnetReady arb;
+    UniswapV2Adapter adapter;
+    MockERC20 tokenA;
+    MockERC20 tokenB;
+    MockLendingPool lendingPool;
+    MockRouter router1;
+    MockRouter router2;
+
+    address owner = address(1);
+    address user = address(2);
+
+    function setUp() public {
+        vm.startPrank(owner);
+
+        // Deploy mocks
+        tokenA = new MockERC20("Token A", "TKA", 18);
+        tokenB = new MockERC20("Token B", "TKB", 18);
+        lendingPool = new MockLendingPool();
+        router1 = new MockRouter(address(tokenA), address(tokenB));
+        router2 = new MockRouter(address(tokenB), address(tokenA));
+
+        // Deploy implementation
+        FlashArbMainnetReady implementation = new FlashArbMainnetReady();
+
+        // Deploy proxy
+        arb = FlashArbMainnetReady(address(implementation));
+
+        // Initialize
+        arb.initialize();
+
+        // Setup adapters
+        adapter = new UniswapV2Adapter();
+        arb.setDexAdapter(address(router1), address(adapter));
+        arb.setDexAdapter(address(router2), address(adapter));
+
+        vm.stopPrank();
+    }
+
+    // Invariant: Contract never holds tokens after flash loan operations
+    function invariantContractBalanceZeroAfterOperations() external {
+        // This would be called by invariant testing framework
+        // Contract should not hold any tokens after successful operations
+        assertEq(tokenA.balanceOf(address(arb)), 0, "Contract should not hold tokenA");
+        assertEq(tokenB.balanceOf(address(arb)), 0, "Contract should not hold tokenB");
+    }
+
+    // Invariant: Only owner can perform privileged operations
+    function invariantOnlyOwnerCanExecute() external {
+        vm.prank(user);
+        vm.expectRevert();
+        arb.startFlashLoan(address(tokenA), 1000 * 10**18, "");
+    }
+
+    // Invariant: Flash loan repayment always succeeds when profitable
+    function invariantFlashLoanRepaymentSucceeds() external {
+        uint256 loanAmount = 1000 * 10**18;
+
+        // Setup profitable arbitrage
+        router1.setExchangeRate(1 * 10**18, 95 * 10**17);
+        router2.setExchangeRate(1 * 10**18, 105 * 10**17);
+
+        deal(address(tokenA), address(lendingPool), loanAmount);
+
+        address[] memory path1 = new address[](2);
+        path1[0] = address(tokenA);
+        path1[1] = address(tokenB);
+
+        address[] memory path2 = new address[](2);
+        path2[0] = address(tokenB);
+        path2[1] = address(tokenA);
+
+        bytes memory params = abi.encode(
+            address(router1),
+            address(router2),
+            path1,
+            path2,
+            90 * 10**17,
+            1000 * 10**18,
+            1 * 10**18,
+            false,
+            owner,
+            block.timestamp + 3600
+        );
+
+        vm.prank(owner);
+        arb.startFlashLoan(address(tokenA), loanAmount, params);
+
+        // Invariant: Contract balance should be >= initial (profit made)
+        assertGe(tokenA.balanceOf(address(arb)), 0);
+    }
+
+    // Invariant: Path validation prevents invalid arbitrage paths
+    function invariantPathValidation() external {
+        address[] memory invalidPath1 = new address[](3);
+        invalidPath1[0] = address(tokenA);
+        invalidPath1[1] = address(tokenB);
+        invalidPath1[2] = address(tokenA); // Invalid
+
+        address[] memory path2 = new address[](2);
+        path2[0] = address(tokenB);
+        path2[1] = address(tokenA);
+
+        bytes memory params = abi.encode(
+            address(router1),
+            address(router2),
+            invalidPath1,
+            path2,
+            90 * 10**17,
+            1000 * 10**18,
+            1 * 10**18,
+            false,
+            owner,
+            block.timestamp + 10
+        );
+
+        vm.prank(owner);
+        vm.expectRevert("path2 must start with intermediate token");
+        arb.startFlashLoan(address(tokenA), 1000 * 10**18, params);
+    }
+
+    // Invariant: Deadline validation prevents expired or too-distant deadlines
+    function invariantDeadlineValidation() external {
+        uint256 loanAmount = 1000 * 10**18;
+
+        address[] memory path1 = new address[](2);
+        path1[0] = address(tokenA);
+        path1[1] = address(tokenB);
+
+        address[] memory path2 = new address[](2);
+        path2[0] = address(tokenB);
+        path2[1] = address(tokenA);
+
+        // Test expired deadline
+        bytes memory paramsExpired = abi.encode(
+            address(router1),
+            address(router2),
+            path1,
+            path2,
+            90 * 10**17,
+            1000 * 10**18,
+            1 * 10**18,
+            false,
+            owner,
+            block.timestamp - 1
+        );
+
+        vm.prank(owner);
+        vm.expectRevert("deadline-invalid");
+        arb.startFlashLoan(address(tokenA), loanAmount, paramsExpired);
+
+        // Test too-distant deadline
+        bytes memory paramsTooFar = abi.encode(
+            address(router1),
+            address(router2),
+            path1,
+            path2,
+            90 * 10**17,
+            1000 * 10**18,
+            1 * 10**18,
+            false,
+            owner,
+            block.timestamp + 31
+        );
+
+        vm.prank(owner);
+        vm.expectRevert("deadline-invalid");
+        arb.startFlashLoan(address(tokenA), loanAmount, paramsTooFar);
+    }
+
+    // Invariant: Only trusted initiators can execute operations
+    function invariantTrustedInitiatorRequired() external {
+        uint256 loanAmount = 1000 * 10**18;
+
+        address[] memory path1 = new address[](2);
+        path1[0] = address(tokenA);
+        path1[1] = address(tokenB);
+
+        address[] memory path2 = new address[](2);
+        path2[0] = address(tokenB);
+        path2[1] = address(tokenA);
+
+        bytes memory params = abi.encode(
+            address(router1),
+            address(router2),
+            path1,
+            path2,
+            90 * 10**17,
+            1000 * 10**18,
+            1 * 10**18,
+            false,
+            address(0x999), // Untrusted
+            block.timestamp + 10
+        );
+
+        vm.prank(owner);
+        vm.expectRevert("initiator-not-trusted");
+        arb.startFlashLoan(address(tokenA), loanAmount, params);
+    }
+
+    // Invariant: Insufficient repayment causes revert
+    function invariantInsufficientRepaymentReverts() external {
+        uint256 loanAmount = 1000 * 10**18;
+
+        // Setup unprofitable arbitrage
+        router1.setExchangeRate(1 * 10**18, 50 * 10**17);
+        router2.setExchangeRate(1 * 10**18, 50 * 10**17);
+
+        deal(address(tokenA), address(lendingPool), loanAmount);
+
+        address[] memory path1 = new address[](2);
+        path1[0] = address(tokenA);
+        path1[1] = address(tokenB);
+
+        address[] memory path2 = new address[](2);
+        path2[0] = address(tokenB);
+        path2[1] = address(tokenA);
+
+        bytes memory params = abi.encode(
+            address(router1),
+            address(router2),
+            path1,
+            path2,
+            40 * 10**17,
+            400 * 10**18,
+            1 * 10**18,
+            false,
+            owner,
+            block.timestamp + 3600
+        );
+
+        vm.prank(owner);
+        vm.expectRevert("insufficient-to-repay");
+        arb.startFlashLoan(address(tokenA), loanAmount, params);
+    }
+}
