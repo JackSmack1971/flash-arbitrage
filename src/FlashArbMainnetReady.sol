@@ -13,10 +13,19 @@ pragma solidity ^0.8.21;
  * - Comprehensive whitelist-based security
  * - Gas-optimized operations
  *
+ * Security Enhancements (Reentrancy & Adapter Protection):
+ * - DEX adapter allowlist with bytecode hash validation
+ * - Reentrancy guards on all owner functions (setRouterWhitelist, setTrustedInitiator, setDexAdapter)
+ * - Runtime adapter validation before execution
+ * - Two-step adapter approval: address + bytecode hash must both be approved
+ * - Prevents malicious adapters from reentering and escalating privileges
+ * - Prevents whitelist bypass by validating adapters at execution time
+ *
  * System Invariants:
  * - FlashLoanRepayment: Contract must repay flash loan + fee
  * - ProfitAccuracy: Profit = balance - debt calculation
  * - PathValidity: Arbitrage paths form valid closed loops
+ * - AdapterSafety: Only approved adapters with approved bytecode can execute
  *
  * @notice Only whitelisted routers and tokens are supported.
  * @notice Owner-controlled execution with timelock upgrade path.
@@ -106,6 +115,10 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     mapping(address => IDexAdapter) public dexAdapters;
     mapping(address => bool) public trustedInitiators; // Security: trusted initiator mapping
 
+    // Security: Adapter allowlist to prevent malicious adapters
+    mapping(address => bool) public approvedAdapters;
+    mapping(bytes32 => bool) public approvedAdapterCodeHashes;
+
     // profits tracked per ERC20 token (token address => token units)
     mapping(address => uint256) public profits;
     // ETH profits (unspecified token) tracked separately
@@ -121,6 +134,8 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     event ProviderUpdated(address provider, address lendingPool);
     event Withdrawn(address token, address to, uint256 amount);
     event DexAdapterSet(address router, address adapter);
+    event AdapterApproved(address indexed adapter, bytes32 codeHash, bool approved);
+    event AdapterCodeHashApproved(bytes32 codeHash, bool approved);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -170,7 +185,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     // Owner functions
-    function setRouterWhitelist(address router, bool allowed) external onlyOwner {
+
+    /**
+     * @notice Set router whitelist status
+     * @dev Protected with nonReentrant to prevent malicious adapter reentrancy attacks
+     */
+    function setRouterWhitelist(address router, bool allowed) external onlyOwner nonReentrant {
         routerWhitelist[router] = allowed;
         emit RouterWhitelisted(router, allowed);
     }
@@ -192,13 +212,59 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         maxSlippageBps = bps;
     }
 
-    function setDexAdapter(address router, address adapter) external onlyOwner {
+    /**
+     * @notice Approve or revoke adapter address and code hash
+     * @dev Two-step validation: both address and bytecode hash must be approved
+     */
+    function approveAdapter(address adapter, bool approved) external onlyOwner nonReentrant {
+        require(adapter != address(0), "adapter-zero");
+        require(adapter.code.length > 0, "adapter-not-contract");
+
+        bytes32 codeHash = adapter.codehash;
+        require(codeHash != bytes32(0), "invalid-code-hash");
+
+        approvedAdapters[adapter] = approved;
+        emit AdapterApproved(adapter, codeHash, approved);
+    }
+
+    /**
+     * @notice Approve or revoke adapter code hash
+     * @dev Allows pre-approving bytecode before deployment
+     */
+    function approveAdapterCodeHash(bytes32 codeHash, bool approved) external onlyOwner nonReentrant {
+        require(codeHash != bytes32(0), "invalid-code-hash");
+        approvedAdapterCodeHashes[codeHash] = approved;
+        emit AdapterCodeHashApproved(codeHash, approved);
+    }
+
+    /**
+     * @notice Set DEX adapter for a router
+     * @dev Enhanced security: validates adapter is approved and matches approved bytecode
+     * @dev Protected with nonReentrant to prevent adapter reentrancy during setup
+     */
+    function setDexAdapter(address router, address adapter) external onlyOwner nonReentrant {
         require(routerWhitelist[router], "router-not-whitelisted");
+
+        // Security: If adapter is non-zero, validate it's approved
+        if (adapter != address(0)) {
+            require(approvedAdapters[adapter], "adapter-not-approved");
+
+            bytes32 codeHash = adapter.codehash;
+            require(approvedAdapterCodeHashes[codeHash], "adapter-code-hash-not-approved");
+
+            // Validate adapter is a contract
+            require(adapter.code.length > 0, "adapter-not-contract");
+        }
+
         dexAdapters[router] = IDexAdapter(adapter);
         emit DexAdapterSet(router, adapter);
     }
 
-    function setTrustedInitiator(address initiator, bool trusted) external onlyOwner {
+    /**
+     * @notice Set trusted initiator status
+     * @dev Protected with nonReentrant to prevent malicious adapter reentrancy attacks
+     */
+    function setTrustedInitiator(address initiator, bool trusted) external onlyOwner nonReentrant {
         trustedInitiators[initiator] = trusted;
     }
 
@@ -278,6 +344,11 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
         uint256 out1;
         if (address(dexAdapters[router1]) != address(0)) {
+            // Security: Validate adapter is still approved before calling
+            address adapter1 = address(dexAdapters[router1]);
+            require(approvedAdapters[adapter1], "adapter1-not-approved");
+            require(approvedAdapterCodeHashes[adapter1.codehash], "adapter1-code-hash-not-approved");
+
             out1 = dexAdapters[router1].swap(router1, _amount, amountOutMin1, path1, address(this), deadline);
         } else {
             uint256[] memory amounts1 = IUniswapV2Router02(router1).swapExactTokensForTokens(_amount, amountOutMin1, path1, address(this), deadline);
@@ -298,6 +369,11 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
         uint256 out2;
         if (address(dexAdapters[router2]) != address(0)) {
+            // Security: Validate adapter is still approved before calling
+            address adapter2 = address(dexAdapters[router2]);
+            require(approvedAdapters[adapter2], "adapter2-not-approved");
+            require(approvedAdapterCodeHashes[adapter2.codehash], "adapter2-code-hash-not-approved");
+
             out2 = dexAdapters[router2].swap(router2, out1, amountOutMin2, path2, address(this), deadline);
         } else {
             uint256[] memory amounts2 = IUniswapV2Router02(router2).swapExactTokensForTokens(out1, amountOutMin2, path2, address(this), deadline);
