@@ -126,7 +126,7 @@ contract AdapterValidationTest is Test {
         path[1] = DAI;
 
         vm.prank(address(flashArb));
-        bypassAdapter.swap(UNISWAP_V2_ROUTER, 1 ether, 0, path, address(flashArb), block.timestamp + 30);
+        bypassAdapter.swap(UNISWAP_V2_ROUTER, 1 ether, 0, path, address(flashArb), block.timestamp + 30, 1e27);
     }
 
     /**
@@ -160,7 +160,7 @@ contract AdapterValidationTest is Test {
         path[1] = DAI;
 
         vm.prank(address(flashArb));
-        arbitraryAdapter.swap(UNISWAP_V2_ROUTER, 1 ether, 0, path, address(flashArb), block.timestamp + 30);
+        arbitraryAdapter.swap(UNISWAP_V2_ROUTER, 1 ether, 0, path, address(flashArb), block.timestamp + 30, 1e27);
     }
 
     /**
