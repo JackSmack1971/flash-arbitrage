@@ -9,6 +9,10 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockRouter} from "../../mocks/MockRouter.sol";
 
+interface IFlashArbLike {
+    function routerWhitelist(address) external view returns (bool);
+}
+
 /**
  * @title ApprovalManagement Test Suite
  * @notice Tests for safe approval patterns and configurable limits (LOW severity findings)
@@ -75,7 +79,7 @@ contract ApprovalManagementTest is Test {
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
         flashArb = FlashArbMainnetReady(payable(address(proxy)));
 
-        adapter = new UniswapV2Adapter();
+        adapter = new UniswapV2Adapter(IFlashArbLike(address(flashArb)));
 
         // Whitelist the mock routers
         flashArb.setRouterWhitelist(address(uniswapRouter), true);

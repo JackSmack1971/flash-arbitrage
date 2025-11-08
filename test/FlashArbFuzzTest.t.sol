@@ -9,6 +9,10 @@ import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockLendingPool} from "../mocks/MockLendingPool.sol";
 import {MockRouter} from "../mocks/MockRouter.sol";
 
+interface IFlashArbLike {
+    function routerWhitelist(address) external view returns (bool);
+}
+
 contract FlashArbFuzzTest is Test {
     FlashArbMainnetReady arb;
     UniswapV2Adapter adapter;
@@ -60,7 +64,7 @@ contract FlashArbFuzzTest is Test {
         arb = FlashArbMainnetReady(payable(address(proxy)));
 
         // Setup adapters
-        adapter = new UniswapV2Adapter();
+        adapter = new UniswapV2Adapter(IFlashArbLike(address(arb)));
 
         // Whitelist the mock routers
         arb.setRouterWhitelist(address(router1), true);

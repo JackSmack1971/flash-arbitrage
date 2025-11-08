@@ -9,6 +9,17 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockRouter} from "../../mocks/MockRouter.sol";
 
+// Import interface and errors from adapter
+interface IFlashArbLike {
+    function routerWhitelist(address) external view returns (bool);
+}
+
+/// @notice Router is not whitelisted - matches UniswapV2Adapter error
+error RouterNotWhitelisted();
+
+/// @notice Caller is not authorized - matches UniswapV2Adapter error
+error UnauthorizedCaller();
+
 /**
  * @title AdapterValidation Test Suite
  * @notice Tests for adapter security validation (HIGH severity: adapter reentrancy/whitelist bypass)
@@ -75,7 +86,7 @@ contract AdapterValidationTest is Test {
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
         flashArb = FlashArbMainnetReady(payable(address(proxy)));
 
-        legitimateAdapter = new UniswapV2Adapter();
+        legitimateAdapter = new UniswapV2Adapter(IFlashArbLike(address(flashArb)));
 
         // Whitelist the mock routers
         flashArb.setRouterWhitelist(address(uniswapRouter), true);
@@ -215,8 +226,8 @@ contract AdapterValidationTest is Test {
      * Expected: Non-allowlisted adapter bytecode causes revert
      */
     function testAdapterBytecodeAllowlist() public {
-        // Create a new adapter instance
-        UniswapV2Adapter newAdapter = new UniswapV2Adapter();
+        // Create a new adapter instance (must pass flashArb address)
+        UniswapV2Adapter newAdapter = new UniswapV2Adapter(IFlashArbLike(address(flashArb)));
         bytes32 newAdapterHash = address(newAdapter).codehash;
 
         // Attempt to set adapter without approving bytecode hash first

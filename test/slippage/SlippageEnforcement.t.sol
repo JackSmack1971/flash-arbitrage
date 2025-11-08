@@ -9,6 +9,10 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockRouter} from "../../mocks/MockRouter.sol";
 
+interface IFlashArbLike {
+    function routerWhitelist(address) external view returns (bool);
+}
+
 /**
  * @title SlippageEnforcement Test Suite
  * @notice Tests for on-chain slippage enforcement (MEDIUM severity: slippage validation)
@@ -79,7 +83,7 @@ contract SlippageEnforcementTest is Test {
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
         flashArb = FlashArbMainnetReady(payable(address(proxy)));
 
-        adapter = new UniswapV2Adapter();
+        adapter = new UniswapV2Adapter(IFlashArbLike(address(flashArb)));
 
         // Whitelist the mock routers
         flashArb.setRouterWhitelist(address(uniswapRouter), true);
