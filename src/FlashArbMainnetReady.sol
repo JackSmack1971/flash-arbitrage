@@ -142,6 +142,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     event DexAdapterSet(address router, address adapter);
     event AdapterApproved(address indexed adapter, bytes32 codeHash, bool approved);
     event AdapterCodeHashApproved(bytes32 codeHash, bool approved);
+    event TrustedInitiatorChanged(address indexed initiator, bool trusted);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -269,9 +270,13 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     /**
      * @notice Set trusted initiator status
      * @dev Protected with nonReentrant to prevent malicious adapter reentrancy attacks
+     * @dev Owner is automatically trusted in initialize() and should not be removed
+     * @param initiator Address to grant or revoke trusted status
+     * @param trusted True to allow initiator to execute operations, false to revoke
      */
     function setTrustedInitiator(address initiator, bool trusted) external onlyOwner nonReentrant {
         trustedInitiators[initiator] = trusted;
+        emit TrustedInitiatorChanged(initiator, trusted);
     }
 
     // params encoding helper (off-chain):
@@ -321,7 +326,9 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
             uint256 deadline
         ) = abi.decode(params, (address, address, address[], address[], uint256, uint256, uint256, bool, address, uint256));
 
-        // Security: Validate trusted initiator
+        // Security: Validate trusted initiator (single source of truth for access control)
+        // Owner is automatically trusted via initialize(). Additional addresses can be
+        // delegated via setTrustedInitiator() for bot/operator access.
         require(trustedInitiators[opInitiator], "initiator-not-trusted");
 
         // Architectural: Invariant checks
@@ -330,7 +337,6 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         require(path1[0] == _reserve, "path1 must start with reserve");
         require(path2[path2.length - 1] == _reserve, "path2 must end with reserve");
         require(initiator == address(this), "initiator-must-be-contract");
-        require(opInitiator == owner(), "opInitiator-must-be-owner");
 
         // MEV protection: Enforce max deadline
         require(deadline >= block.timestamp && deadline <= block.timestamp + MAX_DEADLINE, "deadline-invalid");
