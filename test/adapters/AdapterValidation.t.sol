@@ -8,6 +8,7 @@ import {
     UniswapV2Adapter,
     IFlashArbLike,
     RouterNotWhitelisted,
+    RouterNotContract,
     UnauthorizedCaller
 } from "../../src/UniswapV2Adapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -169,7 +170,8 @@ contract AdapterValidationTest is Test {
 
         vm.stopPrank();
 
-        // When swap is attempted directly, the malicious adapter's own require will trigger
+        // When swap is attempted directly by the bypass adapter calling a non-whitelisted router,
+        // the adapter's own require will trigger since it's a MaliciousAdapter without whitelist checks
         vm.expectRevert("Bypass attempted");
 
         address[] memory path = new address[](2);
@@ -202,7 +204,7 @@ contract AdapterValidationTest is Test {
 
         vm.stopPrank();
 
-        // When swap is attempted directly, the call to arbitraryTarget (no code) fails
+        // When swap is attempted directly, the malicious adapter's call to arbitraryTarget (no code) fails
         // and the adapter's require will trigger
         vm.expectRevert("Arbitrary call attempted");
 
@@ -212,6 +214,39 @@ contract AdapterValidationTest is Test {
 
         vm.prank(address(flashArb));
         arbitraryAdapter.swap(address(uniswapRouter), 1 ether, 0, path, address(flashArb), block.timestamp + 30, 1e27);
+    }
+
+    /**
+     * @notice Test that legitimate adapter rejects non-contract router addresses
+     * @dev Defense-in-depth: adapter validates router is a contract before calling
+     * Expected: RouterNotContract error when router has no code
+     */
+    function testRevertOnNonContractRouter() public {
+        // Approve and configure the legitimate adapter
+        vm.startPrank(owner);
+
+        bytes32 adapterHash = address(legitimateAdapter).codehash;
+        flashArb.approveAdapterCodeHash(adapterHash, true);
+        flashArb.approveAdapter(address(legitimateAdapter), true);
+        flashArb.setDexAdapter(address(uniswapRouter), address(legitimateAdapter));
+
+        vm.stopPrank();
+
+        // Create an EOA address (no code)
+        address eoaRouter = makeAddr("eoaRouter");
+
+        // Whitelist the EOA (to test that code check happens before whitelist check in adapter)
+        vm.prank(owner);
+        flashArb.setRouterWhitelist(eoaRouter, true);
+
+        // Attempt to use the EOA as a router - should fail with RouterNotContract
+        address[] memory path = new address[](2);
+        path[0] = address(weth);
+        path[1] = address(dai);
+
+        vm.expectRevert(RouterNotContract.selector);
+        vm.prank(address(flashArb));
+        legitimateAdapter.swap(eoaRouter, 1 ether, 0, path, address(flashArb), block.timestamp + 30, 1e27);
     }
 
     /**

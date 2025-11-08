@@ -14,6 +14,9 @@ import "./interfaces/IDexInterfaces.sol";
 /// @notice Router is not whitelisted in the main contract
 error RouterNotWhitelisted();
 
+/// @notice Router address has no code (is not a contract)
+error RouterNotContract();
+
 /// @notice Caller is not authorized (must be FlashArbMainnetReady or approved caller)
 error UnauthorizedCaller();
 
@@ -59,10 +62,13 @@ contract UniswapV2Adapter is IDexAdapter {
     ) external returns (uint256 amountOut) {
         require(path.length >= 2, "invalid-path");
 
+        // Defense-in-depth: validate router is a contract
+        if (router.code.length == 0) revert RouterNotContract();
+
         // Defense-in-depth: adapter enforces router whitelist too
         if (!flashArb.routerWhitelist(router)) revert RouterNotWhitelisted();
 
-        // Additional safety: only allow calling whitelisted routers (prevents arbitrary external calls)
+        // Additional safety: only allow calls from FlashArbMainnetReady (prevents arbitrary external calls)
         // The 'to' should be controlled by FlashArb, not arbitrary addresses
         if (msg.sender != address(flashArb)) revert UnauthorizedCaller();
 

@@ -23,14 +23,20 @@ contract FlashArbFuzzTest is Test {
     function setUp() public {
         vm.startPrank(owner);
 
-        // Mock AAVE provider at expected address
+        // Deploy mocks FIRST so we can use their addresses
+        tokenA = new MockERC20("Token A", "TKA", 18);
+        tokenB = new MockERC20("Token B", "TKB", 18);
+        lendingPool = new MockLendingPool();
+        router1 = new MockRouter(address(tokenA), address(tokenB));
+        router2 = new MockRouter(address(tokenB), address(tokenA));
+
+        // Mock AAVE provider at expected address - use ACTUAL lending pool address
         address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
-        address mockLendingPoolAddr = makeAddr("mockLendingPool");
         vm.etch(aaveProvider, hex"00");
         vm.mockCall(
             aaveProvider,
             abi.encodeWithSignature("getLendingPool()"),
-            abi.encode(mockLendingPoolAddr)
+            abi.encode(address(lendingPool))  // Use actual MockLendingPool address
         );
 
         // Mock hardcoded mainnet addresses that initialize() tries to call
@@ -43,13 +49,6 @@ contract FlashArbFuzzTest is Test {
         vm.etch(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, address(mockUSDC).code);
         vm.etch(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, address(mockWETH).code); // Routers
         vm.etch(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F, address(mockWETH).code);
-
-        // Deploy mocks
-        tokenA = new MockERC20("Token A", "TKA", 18);
-        tokenB = new MockERC20("Token B", "TKB", 18);
-        lendingPool = new MockLendingPool();
-        router1 = new MockRouter(address(tokenA), address(tokenB));
-        router2 = new MockRouter(address(tokenB), address(tokenA));
 
         // Deploy implementation
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
