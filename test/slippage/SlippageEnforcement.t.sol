@@ -276,7 +276,7 @@ contract SlippageEnforcementTest is Test {
 /**
  * @notice Mock adapter that simulates poor swap returns (high slippage)
  */
-abstract contract MockPoorSwapAdapter is IDexAdapter {
+contract MockPoorSwapAdapter is IDexAdapter {
     uint256 public returnBps; // Return percentage in BPS (e.g., 9700 = 97%)
 
     constructor(uint256 _returnBps) {
@@ -289,7 +289,8 @@ abstract contract MockPoorSwapAdapter is IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut) {
         // Simulate poor swap: return only returnBps% of input
         amountOut = (amountIn * returnBps) / 10000;
@@ -303,7 +304,7 @@ abstract contract MockPoorSwapAdapter is IDexAdapter {
 /**
  * @notice Mock adapter that simulates good swap returns (acceptable slippage)
  */
-abstract contract MockGoodSwapAdapter is IDexAdapter {
+contract MockGoodSwapAdapter is IDexAdapter {
     uint256 public returnBps;
 
     constructor(uint256 _returnBps) {
@@ -316,7 +317,8 @@ abstract contract MockGoodSwapAdapter is IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut) {
         amountOut = (amountIn * returnBps) / 10000;
         return amountOut;
@@ -326,7 +328,7 @@ abstract contract MockGoodSwapAdapter is IDexAdapter {
 /**
  * @notice Mock adapter that simulates loss-making swaps
  */
-abstract contract MockLossAdapter is IDexAdapter {
+contract MockLossAdapter is IDexAdapter {
     uint256 public returnBps;
 
     constructor(uint256 _returnBps) {
@@ -339,7 +341,8 @@ abstract contract MockLossAdapter is IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut) {
         amountOut = (amountIn * returnBps) / 10000;
         return amountOut;

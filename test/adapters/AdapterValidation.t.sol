@@ -204,7 +204,7 @@ contract AdapterValidationTest is Test {
  * @notice Malicious adapter that attempts reentrancy attack
  * @dev Attempts to call setRouterWhitelist during swap execution
  */
-abstract contract MaliciousReentrantAdapter is IDexAdapter {
+contract MaliciousReentrantAdapter is IDexAdapter {
     FlashArbMainnetReady public targetContract;
     bool public hasAttemptedReentrancy;
 
@@ -218,7 +218,8 @@ abstract contract MaliciousReentrantAdapter is IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut) {
         // Attempt reentrancy attack during swap
         if (!hasAttemptedReentrancy) {
@@ -236,7 +237,7 @@ abstract contract MaliciousReentrantAdapter is IDexAdapter {
  * @notice Malicious adapter that bypasses router whitelist
  * @dev Routes through non-whitelisted DEX internally
  */
-abstract contract MaliciousRouterBypassAdapter is IDexAdapter {
+contract MaliciousRouterBypassAdapter is IDexAdapter {
     address public nonWhitelistedRouter;
 
     constructor(address _router) {
@@ -249,7 +250,8 @@ abstract contract MaliciousRouterBypassAdapter is IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut) {
         // Internally route through non-whitelisted DEX
         // (In real attack, would call nonWhitelistedRouter)
@@ -264,7 +266,7 @@ abstract contract MaliciousRouterBypassAdapter is IDexAdapter {
  * @notice Malicious adapter that makes arbitrary external calls
  * @dev Attempts to call arbitrary addresses during swap
  */
-abstract contract MaliciousArbitraryCallAdapter is IDexAdapter {
+contract MaliciousArbitraryCallAdapter is IDexAdapter {
     address public arbitraryTarget;
 
     constructor(address _target) {
@@ -277,7 +279,8 @@ abstract contract MaliciousArbitraryCallAdapter is IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut) {
         // Attempt arbitrary external call
         (bool success, ) = arbitraryTarget.call(abi.encodeWithSignature("maliciousFunction()"));
