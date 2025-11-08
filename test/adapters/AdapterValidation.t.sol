@@ -4,21 +4,15 @@ pragma solidity ^0.8.21;
 import "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
-import "../../src/UniswapV2Adapter.sol";
+import {
+    UniswapV2Adapter,
+    IFlashArbLike,
+    RouterNotWhitelisted,
+    UnauthorizedCaller
+} from "../../src/UniswapV2Adapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockRouter} from "../../mocks/MockRouter.sol";
-
-// Import interface and errors from adapter
-interface IFlashArbLike {
-    function routerWhitelist(address) external view returns (bool);
-}
-
-/// @notice Router is not whitelisted - matches UniswapV2Adapter error
-error RouterNotWhitelisted();
-
-/// @notice Caller is not authorized - matches UniswapV2Adapter error
-error UnauthorizedCaller();
 
 /**
  * @title AdapterValidation Test Suite
