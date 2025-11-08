@@ -15,7 +15,6 @@ import {MockERC20} from "../../mocks/MockERC20.sol";
  */
 contract PathValidationTest is Test {
     FlashArbMainnetReady public flashArb;
-    address public owner;
 
     function setUp() public {
         // Mock AAVE provider at expected address

@@ -67,8 +67,8 @@ contract SecurityIntegrationTest is Test {
         flashArb.setTokenWhitelist(address(weth), true);
         flashArb.setTokenWhitelist(address(dai), true);
 
-        // Whitelist owner as trusted initiator
-        flashArb.setTrustedInitiator(owner, true);
+        // Whitelist test contract as trusted initiator
+        flashArb.setTrustedInitiator(address(this), true);
     }
 
     /// @notice Validates adapter security: bytecode validation, reentrancy protection
