@@ -96,6 +96,11 @@ interface IWETH is IERC20 {
     function withdraw(uint256 wad) external;
 }
 
+/**
+ * @notice Custom errors for improved gas efficiency and clarity
+ */
+error AdapterSecurityViolation(address adapter, string reason);
+
 contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
 
@@ -346,6 +351,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         if (address(dexAdapters[router1]) != address(0)) {
             // Security: Validate adapter is still approved before calling
             address adapter1 = address(dexAdapters[router1]);
+
+            // Enhanced security: Verify adapter is a contract
+            if (!_isContract(adapter1)) {
+                revert AdapterSecurityViolation(adapter1, "Adapter must be a contract");
+            }
+
             require(approvedAdapters[adapter1], "adapter1-not-approved");
             require(approvedAdapterCodeHashes[adapter1.codehash], "adapter1-code-hash-not-approved");
 
@@ -371,6 +382,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         if (address(dexAdapters[router2]) != address(0)) {
             // Security: Validate adapter is still approved before calling
             address adapter2 = address(dexAdapters[router2]);
+
+            // Enhanced security: Verify adapter is a contract
+            if (!_isContract(adapter2)) {
+                revert AdapterSecurityViolation(adapter2, "Adapter must be a contract");
+            }
+
             require(approvedAdapters[adapter2], "adapter2-not-approved");
             require(approvedAdapterCodeHashes[adapter2.codehash], "adapter2-code-hash-not-approved");
 
@@ -447,6 +464,21 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         require(to != address(0), "to-zero");
         IERC20(token).safeTransfer(to, amount);
         emit Withdrawn(token, to, amount);
+    }
+
+    /**
+     * @notice Internal helper to check if address is a contract
+     * @dev Uses extcodesize to determine if address contains code
+     * @param account Address to check
+     * @return True if account is a contract, false otherwise
+     */
+    function _isContract(address account) internal view returns (bool) {
+        // Check if account has code deployed
+        uint256 size;
+        assembly {
+            size := extcodesize(account)
+        }
+        return size > 0;
     }
 
     // Allow contract to receive ETH
