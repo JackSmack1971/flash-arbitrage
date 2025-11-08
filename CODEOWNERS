@@ -1,0 +1,10 @@
+# Security-critical files require review from security team
+src/FlashArbMainnetReady.sol @security-team
+src/*Adapter.sol @security-team
+docs/SECURITY.md @security-team
+
+# All contract changes should be reviewed
+src/*.sol @contract-reviewers
+
+# Test changes should be reviewed for completeness
+test/ @test-reviewers
