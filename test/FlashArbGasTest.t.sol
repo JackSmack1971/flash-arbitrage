@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import {Test} from "forge-std/Test.sol";
+import "forge-std/console.sol";
 import {FlashArbMainnetReady} from "../../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter} from "../../src/UniswapV2Adapter.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
