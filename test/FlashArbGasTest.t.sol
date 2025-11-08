@@ -34,7 +34,7 @@ contract FlashArbGasTest is Test {
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
 
         // Deploy proxy
-        arb = FlashArbMainnetReady(address(implementation));
+        arb = implementation;
 
         // Initialize
         arb.initialize();
@@ -51,8 +51,8 @@ contract FlashArbGasTest is Test {
         uint256 loanAmount = 1000 * 10**18;
 
         // Setup profitable arbitrage
-        router1.setExchangeRate(1 * 10**18, 95 * 10**17);
-        router2.setExchangeRate(1 * 10**18, 105 * 10**17);
+        router1.setExchangeRate(95 * 10**17);
+        router2.setExchangeRate(105 * 10**17);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 
@@ -104,8 +104,8 @@ contract FlashArbGasTest is Test {
         uint256 loanAmount = 1000 * 10**18;
 
         // Setup profitable arbitrage
-        router1.setExchangeRate(1 * 10**18, 95 * 10**17);
-        router2.setExchangeRate(1 * 10**18, 105 * 10**17);
+        router1.setExchangeRate(95 * 10**17);
+        router2.setExchangeRate(105 * 10**17);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 
@@ -147,8 +147,8 @@ contract FlashArbGasTest is Test {
         uint256 loanAmount = 1000 * 10**18;
 
         // Setup with 3-hop arbitrage path
-        router1.setExchangeRate(1 * 10**18, 90 * 10**17); // Worse rate
-        router2.setExchangeRate(1 * 10**18, 110 * 10**17); // Better rate
+        router1.setExchangeRate(90 * 10**17); // Worse rate
+        router2.setExchangeRate(110 * 10**17); // Better rate
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 

@@ -34,7 +34,7 @@ contract FlashArbInvariantTest is Test {
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
 
         // Deploy proxy
-        arb = FlashArbMainnetReady(address(implementation));
+        arb = implementation;
 
         // Initialize
         arb.initialize();
@@ -67,8 +67,8 @@ contract FlashArbInvariantTest is Test {
         uint256 loanAmount = 1000 * 10**18;
 
         // Setup profitable arbitrage
-        router1.setExchangeRate(1 * 10**18, 95 * 10**17);
-        router2.setExchangeRate(1 * 10**18, 105 * 10**17);
+        router1.setExchangeRate(95 * 10**17);
+        router2.setExchangeRate(105 * 10**17);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 
@@ -213,8 +213,8 @@ contract FlashArbInvariantTest is Test {
         uint256 loanAmount = 1000 * 10**18;
 
         // Setup unprofitable arbitrage
-        router1.setExchangeRate(1 * 10**18, 50 * 10**17);
-        router2.setExchangeRate(1 * 10**18, 50 * 10**17);
+        router1.setExchangeRate(50 * 10**17);
+        router2.setExchangeRate(50 * 10**17);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 

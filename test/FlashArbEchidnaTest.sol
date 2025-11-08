@@ -34,7 +34,7 @@ contract FlashArbEchidnaTest is Test {
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
 
         // Deploy proxy
-        arb = FlashArbMainnetReady(address(implementation));
+        arb = implementation;
 
         // Initialize as owner
         vm.prank(owner);
@@ -73,8 +73,8 @@ contract FlashArbEchidnaTest is Test {
         rate2 = rate2 % (10 * 10**18) + 10**17;
 
         // Setup profitable rates
-        router1.setExchangeRate(1 * 10**18, rate1);
-        router2.setExchangeRate(1 * 10**18, rate2);
+        router1.setExchangeRate(rate1);
+        router2.setExchangeRate(rate2);
 
         // Fund lending pool
         deal(address(tokenA), address(lendingPool), loanAmount);
@@ -255,8 +255,8 @@ contract FlashArbEchidnaTest is Test {
         uint256 balanceBeforeB = tokenB.balanceOf(address(arb));
 
         // Setup and execute operation
-        router1.setExchangeRate(1 * 10**18, 1 * 10**18);
-        router2.setExchangeRate(1 * 10**18, 1 * 10**18);
+        router1.setExchangeRate(1 * 10**18);
+        router2.setExchangeRate(1 * 10**18);
         deal(address(tokenA), address(lendingPool), loanAmount);
 
         address[] memory path1 = new address[](2);

@@ -33,7 +33,7 @@ contract FlashArbFuzzTest is Test {
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
 
         // Deploy proxy
-        arb = FlashArbMainnetReady(address(implementation));
+        arb = implementation;
 
         // Initialize
         arb.initialize();
@@ -54,8 +54,8 @@ contract FlashArbFuzzTest is Test {
         rate2 = bound(rate2, 1 * 10**17, 10 * 10**18); // 0.1 to 10 ratio
 
         // Setup exchange rates
-        router1.setExchangeRate(1 * 10**18, rate1);
-        router2.setExchangeRate(1 * 10**18, rate2);
+        router1.setExchangeRate(rate1);
+        router2.setExchangeRate(rate2);
 
         // Fund lending pool
         deal(address(tokenA), address(lendingPool), loanAmount);
@@ -104,8 +104,8 @@ contract FlashArbFuzzTest is Test {
         intermediateBalance = bound(intermediateBalance, 0, loanAmount * 2);
 
         // Setup profitable arbitrage
-        router1.setExchangeRate(1 * 10**18, 95 * 10**17);
-        router2.setExchangeRate(1 * 10**18, 105 * 10**17);
+        router1.setExchangeRate(95 * 10**17);
+        router2.setExchangeRate(105 * 10**17);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
         deal(address(tokenB), address(arb), intermediateBalance);
@@ -188,8 +188,8 @@ contract FlashArbFuzzTest is Test {
         uint256 loanAmount = 1000 * 10**18;
 
         // Setup profitable arbitrage
-        router1.setExchangeRate(1 * 10**18, 95 * 10**17);
-        router2.setExchangeRate(1 * 10**18, 105 * 10**17);
+        router1.setExchangeRate(95 * 10**17);
+        router2.setExchangeRate(105 * 10**17);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 
@@ -230,8 +230,8 @@ contract FlashArbFuzzTest is Test {
         loanAmount = bound(loanAmount, 1, type(uint256).max);
 
         // Setup rates
-        router1.setExchangeRate(1 * 10**18, 1 * 10**18);
-        router2.setExchangeRate(1 * 10**18, 1 * 10**18);
+        router1.setExchangeRate(1 * 10**18);
+        router2.setExchangeRate(1 * 10**18);
 
         // Try to fund lending pool (may fail for very large amounts)
         try vm.deal(address(tokenA), address(lendingPool), loanAmount) {
@@ -277,8 +277,8 @@ contract FlashArbFuzzTest is Test {
 
         uint256 loanAmount = 1000 * 10**18;
 
-        router1.setExchangeRate(1 * 10**18, rate1);
-        router2.setExchangeRate(1 * 10**18, rate2);
+        router1.setExchangeRate(rate1);
+        router2.setExchangeRate(rate2);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 
