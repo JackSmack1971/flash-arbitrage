@@ -132,6 +132,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
     uint256 public maxSlippageBps = 200; // 2% maximum slippage enforced on-chain in executeOperation
     uint256 public constant MAX_DEADLINE = 30; // MEV protection: max 30 seconds deadline
+    uint256 public maxAllowance = 1e27; // Configurable max token approval (default: 1 billion tokens with 18 decimals)
 
     event FlashLoanRequested(address indexed initiator, address asset, uint256 amount);
     event FlashLoanExecuted(address indexed initiator, address asset, uint256 amount, uint256 fee, uint256 profit);
@@ -143,6 +144,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     event AdapterApproved(address indexed adapter, bytes32 codeHash, bool approved);
     event AdapterCodeHashApproved(bytes32 codeHash, bool approved);
     event TrustedInitiatorChanged(address indexed initiator, bool trusted);
+    event MaxAllowanceUpdated(uint256 newMaxAllowance);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -217,6 +219,18 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     function setMaxSlippage(uint256 bps) external onlyOwner {
         require(bps <= 1000, "max 10% allowed");
         maxSlippageBps = bps;
+    }
+
+    /**
+     * @notice Set maximum token allowance for router approvals
+     * @dev Configurable limit provides control over approval amounts
+     * @param _maxAllowance New maximum allowance (must be >= 1e24 to support large operations)
+     */
+    function setMaxAllowance(uint256 _maxAllowance) external onlyOwner {
+        require(_maxAllowance >= 1e24, "Allowance too low");
+        require(_maxAllowance <= type(uint256).max, "Allowance overflow");
+        maxAllowance = _maxAllowance;
+        emit MaxAllowanceUpdated(_maxAllowance);
     }
 
     /**
