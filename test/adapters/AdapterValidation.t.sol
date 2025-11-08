@@ -72,6 +72,10 @@ contract AdapterValidationTest is Test {
         flashArb = FlashArbMainnetReady(payable(address(proxy)));
 
         legitimateAdapter = new UniswapV2Adapter();
+
+        // Whitelist the mock routers
+        flashArb.setRouterWhitelist(address(uniswapRouter), true);
+        flashArb.setRouterWhitelist(address(sushiswapRouter), true);
     }
 
     /**

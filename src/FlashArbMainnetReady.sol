@@ -111,10 +111,10 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     // ETH profits (unspecified token) tracked separately
     uint256 public ethProfits;
 
-    uint256 public maxSlippageBps = 200; // 2% maximum slippage enforced on-chain in executeOperation
+    uint256 public maxSlippageBps; // 2% maximum slippage enforced on-chain in executeOperation
     uint256 public constant MAX_DEADLINE = 30; // MEV protection: max 30 seconds deadline
-    uint256 public maxAllowance = 1e27; // Configurable max token approval (default: 1 billion tokens with 18 decimals)
-    uint8 public maxPathLength = 5; // Maximum swap path length (default: 5 allows direct + 2-hop paths)
+    uint256 public maxAllowance; // Configurable max token approval (default: 1 billion tokens with 18 decimals)
+    uint8 public maxPathLength; // Maximum swap path length (default: 5 allows direct + 2-hop paths)
 
     event FlashLoanRequested(address indexed initiator, address asset, uint256 amount);
     event FlashLoanExecuted(address indexed initiator, address asset, uint256 amount, uint256 fee, uint256 profit);
@@ -141,6 +141,11 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         __ReentrancyGuard_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
+
+        // Initialize configuration defaults
+        maxSlippageBps = 200; // 2% maximum slippage
+        maxAllowance = 1e27; // 1 billion tokens with 18 decimals
+        maxPathLength = 5; // Maximum swap path length
 
         provider = ILendingPoolAddressesProvider(AAVE_PROVIDER);
         lendingPool = provider.getLendingPool();

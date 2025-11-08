@@ -61,6 +61,12 @@ contract FlashArbEchidnaTest is Test {
         vm.prank(owner);
         adapter = new UniswapV2Adapter();
 
+        // Whitelist the mock routers
+        vm.prank(owner);
+        arb.setRouterWhitelist(address(router1), true);
+        vm.prank(owner);
+        arb.setRouterWhitelist(address(router2), true);
+
         // Approve adapter and its bytecode hash
         bytes32 adapterHash = address(adapter).codehash;
         vm.prank(owner);

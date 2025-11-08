@@ -59,6 +59,10 @@ contract FlashArbInvariantTest is Test {
         // Setup adapters
         adapter = new UniswapV2Adapter();
 
+        // Whitelist the mock routers
+        arb.setRouterWhitelist(address(router1), true);
+        arb.setRouterWhitelist(address(router2), true);
+
         // Approve adapter and its bytecode hash
         bytes32 adapterHash = address(adapter).codehash;
         arb.approveAdapterCodeHash(adapterHash, true);

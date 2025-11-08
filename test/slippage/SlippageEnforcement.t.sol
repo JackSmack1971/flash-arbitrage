@@ -76,6 +76,10 @@ contract SlippageEnforcementTest is Test {
 
         adapter = new UniswapV2Adapter();
 
+        // Whitelist the mock routers
+        flashArb.setRouterWhitelist(address(uniswapRouter), true);
+        flashArb.setRouterWhitelist(address(sushiswapRouter), true);
+
         // Setup adapters
         bytes32 adapterHash = address(adapter).codehash;
         flashArb.approveAdapterCodeHash(adapterHash, true);

@@ -72,6 +72,10 @@ contract ApprovalManagementTest is Test {
         flashArb = FlashArbMainnetReady(payable(address(proxy)));
 
         adapter = new UniswapV2Adapter();
+
+        // Whitelist the mock routers
+        flashArb.setRouterWhitelist(address(uniswapRouter), true);
+        flashArb.setRouterWhitelist(address(sushiswapRouter), true);
     }
 
     /**

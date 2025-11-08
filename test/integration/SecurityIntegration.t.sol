@@ -55,6 +55,9 @@ contract SecurityIntegrationTest is Test {
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
         flashArb = FlashArbMainnetReady(payable(address(proxy)));
         adapter = new UniswapV2Adapter();
+
+        // Whitelist the mock router
+        flashArb.setRouterWhitelist(address(uniswapRouter), true);
     }
 
     /// @notice Validates adapter security: bytecode validation, reentrancy protection
