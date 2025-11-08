@@ -21,7 +21,8 @@ interface IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut);
 }
 
@@ -34,12 +35,14 @@ contract UniswapV2Adapter is IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut) {
         require(path.length >= 2, "invalid-path");
 
-        // Approve router to spend token
-        IERC20(path[0]).safeApprove(router, amountIn);
+        // Safe approval pattern: reset to 0 then set to maxAllowance
+        IERC20(path[0]).safeApprove(router, 0);
+        IERC20(path[0]).safeApprove(router, maxAllowance);
 
         uint256[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
             amountIn,

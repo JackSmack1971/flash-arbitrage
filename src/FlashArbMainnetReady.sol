@@ -87,7 +87,8 @@ interface IDexAdapter {
         uint256 amountOutMin,
         address[] calldata path,
         address to,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAllowance
     ) external returns (uint256 amountOut);
 }
 
@@ -177,18 +178,33 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         // Security: Set owner as trusted initiator
         trustedInitiators[msg.sender] = true;
 
-        // Economic optimization: Infinite approvals for common routers
-        _setupInfiniteApprovals();
+        // Security: Setup controlled approvals for common routers using maxAllowance
+        _setupRouterApprovals();
     }
 
-    function _setupInfiniteApprovals() internal {
-        // Approve common routers for infinite spending to eliminate redundant approvals
-        IERC20(WETH).safeApprove(UNISWAP_V2_ROUTER, type(uint256).max);
-        IERC20(WETH).safeApprove(SUSHISWAP_ROUTER, type(uint256).max);
-        IERC20(DAI).safeApprove(UNISWAP_V2_ROUTER, type(uint256).max);
-        IERC20(DAI).safeApprove(SUSHISWAP_ROUTER, type(uint256).max);
-        IERC20(USDC).safeApprove(UNISWAP_V2_ROUTER, type(uint256).max);
-        IERC20(USDC).safeApprove(SUSHISWAP_ROUTER, type(uint256).max);
+    /**
+     * @notice Setup token approvals for common routers using safe approval pattern
+     * @dev Uses maxAllowance instead of infinite approvals for better security
+     * @dev Follows safeApprove(0) then safeApprove(amount) pattern for token compatibility
+     */
+    function _setupRouterApprovals() internal {
+        // WETH approvals with safe pattern (reset to 0 then set to maxAllowance)
+        IERC20(WETH).safeApprove(UNISWAP_V2_ROUTER, 0);
+        IERC20(WETH).safeApprove(UNISWAP_V2_ROUTER, maxAllowance);
+        IERC20(WETH).safeApprove(SUSHISWAP_ROUTER, 0);
+        IERC20(WETH).safeApprove(SUSHISWAP_ROUTER, maxAllowance);
+
+        // DAI approvals with safe pattern
+        IERC20(DAI).safeApprove(UNISWAP_V2_ROUTER, 0);
+        IERC20(DAI).safeApprove(UNISWAP_V2_ROUTER, maxAllowance);
+        IERC20(DAI).safeApprove(SUSHISWAP_ROUTER, 0);
+        IERC20(DAI).safeApprove(SUSHISWAP_ROUTER, maxAllowance);
+
+        // USDC approvals with safe pattern
+        IERC20(USDC).safeApprove(UNISWAP_V2_ROUTER, 0);
+        IERC20(USDC).safeApprove(UNISWAP_V2_ROUTER, maxAllowance);
+        IERC20(USDC).safeApprove(SUSHISWAP_ROUTER, 0);
+        IERC20(USDC).safeApprove(SUSHISWAP_ROUTER, maxAllowance);
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
@@ -388,7 +404,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
                 revert AdapterSecurityViolation(adapter1, "Adapter bytecode not approved");
             }
 
-            out1 = dexAdapters[router1].swap(router1, _amount, amountOutMin1, path1, address(this), deadline);
+            out1 = dexAdapters[router1].swap(router1, _amount, amountOutMin1, path1, address(this), deadline, maxAllowance);
         } else {
             uint256[] memory amounts1 = IUniswapV2Router02(router1).swapExactTokensForTokens(_amount, amountOutMin1, path1, address(this), deadline);
             out1 = amounts1[amounts1.length - 1];
@@ -432,7 +448,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
                 revert AdapterSecurityViolation(adapter2, "Adapter bytecode not approved");
             }
 
-            out2 = dexAdapters[router2].swap(router2, out1, amountOutMin2, path2, address(this), deadline);
+            out2 = dexAdapters[router2].swap(router2, out1, amountOutMin2, path2, address(this), deadline, maxAllowance);
         } else {
             uint256[] memory amounts2 = IUniswapV2Router02(router2).swapExactTokensForTokens(out1, amountOutMin2, path2, address(this), deadline);
             out2 = amounts2[amounts2.length - 1];
