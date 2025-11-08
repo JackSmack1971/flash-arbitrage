@@ -102,6 +102,7 @@ interface IWETH is IERC20 {
  */
 error AdapterSecurityViolation(address adapter, string reason);
 error SlippageExceeded(uint256 expected, uint256 actual, uint256 maxBps);
+error PathTooLong(uint256 pathLength, uint256 maxAllowed);
 
 contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
@@ -134,6 +135,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     uint256 public maxSlippageBps = 200; // 2% maximum slippage enforced on-chain in executeOperation
     uint256 public constant MAX_DEADLINE = 30; // MEV protection: max 30 seconds deadline
     uint256 public maxAllowance = 1e27; // Configurable max token approval (default: 1 billion tokens with 18 decimals)
+    uint8 public maxPathLength = 5; // Maximum swap path length (default: 5 allows direct + 2-hop paths)
 
     event FlashLoanRequested(address indexed initiator, address asset, uint256 amount);
     event FlashLoanExecuted(address indexed initiator, address asset, uint256 amount, uint256 fee, uint256 profit);
@@ -146,6 +148,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     event AdapterCodeHashApproved(bytes32 codeHash, bool approved);
     event TrustedInitiatorChanged(address indexed initiator, bool trusted);
     event MaxAllowanceUpdated(uint256 newMaxAllowance);
+    event MaxPathLengthUpdated(uint8 newMaxPathLength);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -247,6 +250,18 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         require(_maxAllowance <= type(uint256).max, "Allowance overflow");
         maxAllowance = _maxAllowance;
         emit MaxAllowanceUpdated(_maxAllowance);
+    }
+
+    /**
+     * @notice Set maximum path length for swap paths
+     * @dev Prevents gas DOS attacks from excessively long paths
+     * @param _maxPathLength New maximum path length (2-10 hops)
+     */
+    function setMaxPathLength(uint8 _maxPathLength) external onlyOwner {
+        require(_maxPathLength >= 2, "Path length too short");
+        require(_maxPathLength <= 10, "Path length too long");
+        maxPathLength = _maxPathLength;
+        emit MaxPathLengthUpdated(_maxPathLength);
     }
 
     /**
@@ -364,6 +379,15 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         // Architectural: Invariant checks
         require(routerWhitelist[router1] && routerWhitelist[router2], "router-not-allowed");
         require(path1.length >= 2 && path2.length >= 2, "invalid-paths");
+
+        // Security: Validate path lengths before expensive whitelist iteration (gas DOS prevention)
+        if (path1.length > maxPathLength) {
+            revert PathTooLong(path1.length, maxPathLength);
+        }
+        if (path2.length > maxPathLength) {
+            revert PathTooLong(path2.length, maxPathLength);
+        }
+
         require(path1[0] == _reserve, "path1 must start with reserve");
         require(path2[path2.length - 1] == _reserve, "path2 must end with reserve");
         require(initiator == address(this), "initiator-must-be-contract");
