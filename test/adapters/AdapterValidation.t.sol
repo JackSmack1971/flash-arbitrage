@@ -80,6 +80,13 @@ contract AdapterValidationTest is Test {
         // Whitelist the mock routers
         flashArb.setRouterWhitelist(address(uniswapRouter), true);
         flashArb.setRouterWhitelist(address(sushiswapRouter), true);
+
+        // Whitelist tokens so tests can proceed past asset validation
+        flashArb.setTokenWhitelist(address(weth), true);
+        flashArb.setTokenWhitelist(address(dai), true);
+
+        // Whitelist owner as trusted initiator
+        flashArb.setTrustedInitiator(owner, true);
     }
 
     /**

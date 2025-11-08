@@ -82,6 +82,16 @@ contract FlashArbEchidnaTest is Test {
         arb.setDexAdapter(address(router1), address(adapter));
         vm.prank(owner);
         arb.setDexAdapter(address(router2), address(adapter));
+
+        // Whitelist tokens so tests can proceed past asset validation
+        vm.prank(owner);
+        arb.setTokenWhitelist(address(tokenA), true);
+        vm.prank(owner);
+        arb.setTokenWhitelist(address(tokenB), true);
+
+        // Whitelist owner as trusted initiator
+        vm.prank(owner);
+        arb.setTrustedInitiator(owner, true);
     }
 
     // Property: Contract never holds tokens after operations

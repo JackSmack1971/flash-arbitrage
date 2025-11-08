@@ -62,6 +62,13 @@ contract SecurityIntegrationTest is Test {
 
         // Whitelist the mock router
         flashArb.setRouterWhitelist(address(uniswapRouter), true);
+
+        // Whitelist tokens so tests can proceed past asset validation
+        flashArb.setTokenWhitelist(address(weth), true);
+        flashArb.setTokenWhitelist(address(dai), true);
+
+        // Whitelist owner as trusted initiator
+        flashArb.setTrustedInitiator(owner, true);
     }
 
     /// @notice Validates adapter security: bytecode validation, reentrancy protection

@@ -74,6 +74,13 @@ contract FlashArbFuzzTest is Test {
         arb.setDexAdapter(address(router1), address(adapter));
         arb.setDexAdapter(address(router2), address(adapter));
 
+        // Whitelist tokens so tests can proceed past asset validation
+        arb.setTokenWhitelist(address(tokenA), true);
+        arb.setTokenWhitelist(address(tokenB), true);
+
+        // Whitelist owner as trusted initiator
+        arb.setTrustedInitiator(owner, true);
+
         vm.stopPrank();
     }
 

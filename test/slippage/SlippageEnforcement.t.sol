@@ -33,6 +33,7 @@ contract SlippageEnforcementTest is Test {
 
     address public owner;
     address public user;
+    address public mockLendingPool;
 
     function setUp() public {
         owner = address(this);
@@ -40,7 +41,7 @@ contract SlippageEnforcementTest is Test {
 
         // Mock AAVE provider at expected address
         address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
-        address mockLendingPool = makeAddr("mockLendingPool");
+        mockLendingPool = makeAddr("mockLendingPool");
 
         // Deploy mock provider bytecode
         vm.etch(aaveProvider, hex"00");
@@ -90,6 +91,14 @@ contract SlippageEnforcementTest is Test {
         flashArb.approveAdapter(address(adapter), true);
         flashArb.setDexAdapter(address(uniswapRouter), address(adapter));
         flashArb.setDexAdapter(address(sushiswapRouter), address(adapter));
+
+        // Whitelist tokens so tests can proceed past asset validation
+        flashArb.setTokenWhitelist(address(weth), true);
+        flashArb.setTokenWhitelist(address(dai), true);
+        flashArb.setTokenWhitelist(address(usdc), true);
+
+        // Whitelist owner as trusted initiator
+        flashArb.setTrustedInitiator(owner, true);
     }
 
     /**
@@ -147,6 +156,7 @@ contract SlippageEnforcementTest is Test {
         uint256[] memory premiums = new uint256[](1);
         premiums[0] = 0.0009 ether; // 0.09% fee
 
+        vm.prank(mockLendingPool);
         flashArb.executeOperation(assets, amounts, premiums, address(flashArb), params);
     }
 
@@ -202,6 +212,7 @@ contract SlippageEnforcementTest is Test {
         uint256[] memory premiums = new uint256[](1);
         premiums[0] = 0.0009 ether;
 
+        vm.prank(mockLendingPool);
         bool success = flashArb.executeOperation(assets, amounts, premiums, address(flashArb), params);
         assertTrue(success);
     }
@@ -301,6 +312,7 @@ contract SlippageEnforcementTest is Test {
         uint256[] memory premiums = new uint256[](1);
         premiums[0] = 0.0009 ether;
 
+        vm.prank(mockLendingPool);
         flashArb.executeOperation(assets, amounts, premiums, address(flashArb), params);
     }
 

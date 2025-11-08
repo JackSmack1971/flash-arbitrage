@@ -77,6 +77,13 @@ contract FlashArbGasTest is Test {
         arb.setDexAdapter(address(router1), address(adapter));
         arb.setDexAdapter(address(router2), address(adapter));
 
+        // Whitelist tokens so tests can proceed past asset validation
+        arb.setTokenWhitelist(address(tokenA), true);
+        arb.setTokenWhitelist(address(tokenB), true);
+
+        // Whitelist owner as trusted initiator
+        arb.setTrustedInitiator(owner, true);
+
         vm.stopPrank();
     }
 
@@ -130,8 +137,8 @@ contract FlashArbGasTest is Test {
         for (uint256 i = 0; i < 10; i++) {
             address user = address(uint160(i + 1));
             vm.deal(user, 10 ether);
-            vm.prank(user);
             // Simulate deposits if contract had deposit functionality
+            // Note: removed vm.prank(user) as there's no call to consume it
         }
 
         uint256 loanAmount = 1000 * 10**18;
