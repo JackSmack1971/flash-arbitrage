@@ -38,11 +38,15 @@ contract MockLendingPool {
         balances[asset] -= amount;
         IERC20(asset).transfer(receiverAddress, amount);
 
+        // Create fees array
+        uint256[] memory fees = new uint256[](1);
+        fees[0] = fee;
+
         // Call executeOperation
         bool success = IFlashLoanReceiver(receiverAddress).executeOperation(
             assets,
             amounts,
-            [fee],
+            fees,
             address(this), // initiator is lending pool
             params
         );

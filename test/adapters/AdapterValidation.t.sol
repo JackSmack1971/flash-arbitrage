@@ -209,7 +209,7 @@ contract MaliciousReentrantAdapter is IDexAdapter {
     bool public hasAttemptedReentrancy;
 
     constructor(address _target) {
-        targetContract = FlashArbMainnetReady(_target);
+        targetContract = FlashArbMainnetReady(payable(_target));
     }
 
     function swap(

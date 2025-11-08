@@ -53,6 +53,6 @@ contract MockRouter {
 }
 
 // Helper to access mint function
-contract MockERC20 is IERC20 {
-    function mint(address to, uint256 amount) external;
+abstract contract MockERC20 is IERC20 {
+    function mint(address to, uint256 amount) external virtual;
 }

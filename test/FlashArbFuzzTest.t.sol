@@ -234,7 +234,7 @@ contract FlashArbFuzzTest is Test {
         router2.setExchangeRate(1 * 10**18);
 
         // Try to fund lending pool (may fail for very large amounts)
-        try vm.deal(address(tokenA), address(lendingPool), loanAmount) {
+        try this.dealTokens(address(tokenA), address(lendingPool), loanAmount) {
             // Funding succeeded
         } catch {
             // Skip test if funding fails
@@ -314,5 +314,10 @@ contract FlashArbFuzzTest is Test {
             // Expected reverts for insufficient repayment
             assertEq(reason, "insufficient-to-repay");
         }
+    }
+
+    // Helper function for dealing tokens (external to use with try/catch)
+    function dealTokens(address token, address to, uint256 amount) external {
+        deal(token, to, amount);
     }
 }
