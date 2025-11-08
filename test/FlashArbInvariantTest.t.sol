@@ -81,6 +81,11 @@ contract FlashArbInvariantTest is Test {
         // Whitelist owner as trusted initiator
         arb.setTrustedInitiator(owner, true);
 
+        // Seed lending pool with massive liquidity to handle any invariant test scenario
+        uint256 MASSIVE_LIQUIDITY = 1e30; // 1e12 tokens with 18 decimals
+        deal(address(tokenA), address(lendingPool), MASSIVE_LIQUIDITY);
+        deal(address(tokenB), address(lendingPool), MASSIVE_LIQUIDITY);
+
         vm.stopPrank();
     }
 
@@ -107,7 +112,7 @@ contract FlashArbInvariantTest is Test {
         router1.setExchangeRate(95 * 10**17);
         router2.setExchangeRate(105 * 10**17);
 
-        deal(address(tokenA), address(lendingPool), loanAmount);
+        // Pool already seeded in setUp
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
@@ -253,7 +258,7 @@ contract FlashArbInvariantTest is Test {
         router1.setExchangeRate(50 * 10**17);
         router2.setExchangeRate(50 * 10**17);
 
-        deal(address(tokenA), address(lendingPool), loanAmount);
+        // Pool already seeded in setUp
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);

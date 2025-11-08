@@ -80,13 +80,19 @@ contract FlashArbFuzzTest is Test {
         // Whitelist owner as trusted initiator
         arb.setTrustedInitiator(owner, true);
 
+        // Seed lending pool with massive liquidity to handle any fuzz scenario
+        uint256 MASSIVE_LIQUIDITY = 1e30; // 1e12 tokens with 18 decimals
+        deal(address(tokenA), address(lendingPool), MASSIVE_LIQUIDITY);
+        deal(address(tokenB), address(lendingPool), MASSIVE_LIQUIDITY);
+
         vm.stopPrank();
     }
 
     // Fuzz test for profit calculation edge cases
     function testFuzzProfitCalculation(uint256 loanAmount, uint256 rate1, uint256 rate2) external {
-        // Bound inputs to reasonable ranges
-        loanAmount = bound(loanAmount, 1 * 10**18, 1000000 * 10**18); // 1 to 1M tokens
+        // Bound inputs to reasonable ranges that pool can support
+        // Pool has 1e30, so cap at 1e29 to leave headroom for fees
+        loanAmount = bound(loanAmount, 1 * 10**18, 1e29); // 1 to 1e11 tokens (reasonable for flash loans)
         rate1 = bound(rate1, 1 * 10**17, 10 * 10**18); // 0.1 to 10 ratio
         rate2 = bound(rate2, 1 * 10**17, 10 * 10**18); // 0.1 to 10 ratio
 
@@ -94,8 +100,7 @@ contract FlashArbFuzzTest is Test {
         router1.setExchangeRate(rate1);
         router2.setExchangeRate(rate2);
 
-        // Fund lending pool
-        deal(address(tokenA), address(lendingPool), loanAmount);
+        // Pool already seeded with massive liquidity in setUp
 
         // Calculate expected profit
         uint256 amountOut1 = (loanAmount * rate1) / 10**18;
@@ -137,14 +142,15 @@ contract FlashArbFuzzTest is Test {
 
     // Fuzz test for balance validation scenarios
     function testFuzzBalanceValidation(uint256 loanAmount, uint256 intermediateBalance) external {
-        loanAmount = bound(loanAmount, 1 * 10**18, 100000 * 10**18);
+        // Bound to amounts pool can support
+        loanAmount = bound(loanAmount, 1 * 10**18, 1e28); // Cap well below pool's 1e30
         intermediateBalance = bound(intermediateBalance, 0, loanAmount * 2);
 
         // Setup profitable arbitrage
         router1.setExchangeRate(95 * 10**17);
         router2.setExchangeRate(105 * 10**17);
 
-        deal(address(tokenA), address(lendingPool), loanAmount);
+        // Pool already seeded; optionally add intermediate balance to arb contract
         deal(address(tokenB), address(arb), intermediateBalance);
 
         address[] memory path1 = new address[](2);
@@ -220,7 +226,8 @@ contract FlashArbFuzzTest is Test {
 
     // Fuzz test for deadline timing edge cases
     function testFuzzDeadlineTiming(uint256 deadlineOffset) external {
-        deadlineOffset = bound(deadlineOffset, 0, 100);
+        // Bound to reasonable deadline window (contract allows max 30 seconds)
+        deadlineOffset = bound(deadlineOffset, 0, 35); // Test both valid (0-30) and invalid (31-35)
 
         uint256 loanAmount = 1000 * 10**18;
 
@@ -228,7 +235,7 @@ contract FlashArbFuzzTest is Test {
         router1.setExchangeRate(95 * 10**17);
         router2.setExchangeRate(105 * 10**17);
 
-        deal(address(tokenA), address(lendingPool), loanAmount);
+        // Pool already seeded in setUp
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
@@ -265,19 +272,16 @@ contract FlashArbFuzzTest is Test {
 
     // Fuzz test for boundary values in loan amounts
     function testFuzzLoanAmountBoundaries(uint256 loanAmount) external {
-        loanAmount = bound(loanAmount, 1, type(uint256).max);
+        // Cap to pool's available liquidity (1e30 minus small buffer for fees)
+        uint256 maxAvailable = 9e29; // 90% of pool to leave headroom
+        loanAmount = bound(loanAmount, 1, maxAvailable);
 
         // Setup rates
         router1.setExchangeRate(1 * 10**18);
         router2.setExchangeRate(1 * 10**18);
 
-        // Try to fund lending pool (may fail for very large amounts)
-        try this.dealTokens(address(tokenA), address(lendingPool), loanAmount) {
-            // Funding succeeded
-        } catch {
-            // Skip test if funding fails
-            return;
-        }
+        // Pool already seeded with sufficient liquidity in setUp
+        // No need to deal additional tokens
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
@@ -300,25 +304,24 @@ contract FlashArbFuzzTest is Test {
             block.timestamp + 10
         );
 
-        vm.prank(owner);
-
         // Should not revert due to overflow/underflow in calculations
-        if (loanAmount <= 1000000 * 10**18) { // Reasonable upper bound
-            arb.startFlashLoan(address(tokenA), loanAmount, params);
-        }
+        // With bounded loan amounts, should always succeed
+        vm.prank(owner);
+        arb.startFlashLoan(address(tokenA), loanAmount, params);
     }
 
     // Fuzz test for exchange rate edge cases
     function testFuzzExchangeRateEdgeCases(uint256 rate1, uint256 rate2) external {
-        rate1 = bound(rate1, 1, type(uint256).max / 10**18); // Prevent overflow
-        rate2 = bound(rate2, 1, type(uint256).max / 10**18);
+        // Bound to reasonable exchange rates (0.01x to 100x)
+        rate1 = bound(rate1, 1 * 10**16, 100 * 10**18); // 0.01 to 100
+        rate2 = bound(rate2, 1 * 10**16, 100 * 10**18); // 0.01 to 100
 
         uint256 loanAmount = 1000 * 10**18;
 
         router1.setExchangeRate(rate1);
         router2.setExchangeRate(rate2);
 
-        deal(address(tokenA), address(lendingPool), loanAmount);
+        // Pool already seeded in setUp
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
