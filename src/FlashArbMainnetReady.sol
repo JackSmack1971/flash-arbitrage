@@ -149,6 +149,8 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     event TrustedInitiatorChanged(address indexed initiator, bool trusted);
     event MaxAllowanceUpdated(uint256 newMaxAllowance);
     event MaxPathLengthUpdated(uint8 newMaxPathLength);
+    event MaxSlippageUpdated(uint256 newMaxSlippageBps);
+    event EmergencyWithdrawn(address indexed token, address indexed to, uint256 amount);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -238,6 +240,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     function setMaxSlippage(uint256 bps) external onlyOwner {
         require(bps <= 1000, "max 10% allowed");
         maxSlippageBps = bps;
+        emit MaxSlippageUpdated(bps);
     }
 
     /**
@@ -546,7 +549,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     function emergencyWithdrawERC20(address token, uint256 amount, address to) external onlyOwner nonReentrant {
         require(to != address(0), "to-zero");
         IERC20(token).safeTransfer(to, amount);
-        emit Withdrawn(token, to, amount);
+        emit EmergencyWithdrawn(token, to, amount);
     }
 
     /**
