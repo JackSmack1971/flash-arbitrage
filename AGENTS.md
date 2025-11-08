@@ -331,107 +331,483 @@ This document provides essential context for AI models interacting with the Flas
 
 **THIS IS A HIGH-RISK DEFI PROTOCOL. SECURITY IS PARAMOUNT.**
 
-*   **General Security Practices:**
-    *   **Assume all external contracts are malicious** until proven otherwise
-    *   **Validate all inputs** from untrusted sources (user parameters, external calls)
-    *   **Follow Check-Effects-Interactions pattern** religiously
-    *   **Use reentrancy guards** on all functions with external calls
-    *   **Never hardcode secrets** (private keys, API keys, sensitive addresses)
-    *   **Principle of least privilege**: Minimize permissions and access control
+**Real-World Context**: In 2024, smart contract vulnerabilities caused $1.09B in losses: Access control violations ($953.2M), logic errors ($63.8M), reentrancy ($35.7M), and flash loans ($33.8M). This project implements multiple defense layers to prevent these attack vectors.
 
-*   **Sensitive Data Handling:**
-    *   **NEVER** commit private keys or mnemonics to version control
-    *   Use environment variables (`.env`) for all sensitive configuration
-    *   **NEVER** log sensitive data (keys, balances, addresses) in production
-    *   Store mainnet RPC URLs and API keys in secure password managers
+### 7.1 OWASP Smart Contract Top 10 (2025) - Project Compliance Matrix
 
-*   **Smart Contract Security (Critical):**
-    *   **Flash Loan Repayment**: ALWAYS verify sufficient balance before flash loan return (`require(finalBalance >= totalDebt)`)
-    *   **Slippage Protection**: Enforce on-chain slippage limits via `maxSlippageBps` (never trust frontend-only validation)
-    *   **Deadline Enforcement**: REJECT transactions older than `MAX_DEADLINE` (30 seconds) to prevent MEV exploitation
-    *   **Adapter Validation**: Two-step validation (address + bytecode hash) prevents malicious adapter substitution
-    *   **Whitelist Management**: Only owner can modify whitelists; validate all whitelist changes in tests
-    *   **Reentrancy**: All owner functions (setRouterWhitelist, setTrustedInitiator, setDexAdapter) use `nonReentrant`
-    *   **Integer Overflow**: Solidity 0.8.x provides automatic overflow checks; DO NOT use unchecked blocks unless gas-critical and security-reviewed
-    *   **Access Control**: Only owner and trusted initiators can trigger flash loans; validate initiator in executeOperation
-    *   **External Call Ordering**: Balance checks BEFORE and AFTER external swaps; validate intermediate token balances
-    *   **Gas Griefing**: Use `gasleft()` validation for long-running operations if needed
+This contract addresses all OWASP Smart Contract Top 10 vulnerabilities through the following mechanisms:
 
-*   **Vulnerability Avoidance (Top CWEs for Smart Contracts):**
-    *   **CWE-284 (Improper Access Control)**: Use OpenZeppelin's Ownable; validate msg.sender in executeOperation
-    *   **CWE-362 (Race Conditions/Reentrancy)**: Use ReentrancyGuard; follow Check-Effects-Interactions
-    *   **CWE-682 (Incorrect Calculation)**: Test arithmetic operations with fuzz testing; use SafeMath patterns where appropriate
-    *   **CWE-703 (Improper Check of Exceptional Conditions)**: Always validate external call returns; use try-catch for risky operations
-    *   **CWE-829 (Inclusion of Untrusted Functionality)**: Validate adapter bytecode hashes; whitelist all external contracts
+#### **SC01:2025 - Access Control Vulnerabilities** ✅ **MITIGATED**
 
-*   **Auditing & Review:**
-    *   **Before mainnet deployment**: External smart contract audit from reputable firm (Trail of Bits, OpenZeppelin, Consensys Diligence)
-    *   **After significant changes**: Internal security review + re-audit of modified components
-    *   **Continuous monitoring**: Set up alerts for unusual contract activity (large withdrawals, failed transactions)
+**Risk**: Unauthorized minting, asset transfers, or critical function execution.
 
-*   **Testing for Security:**
-    *   **Invariant tests**: Validate that flash loans are ALWAYS repaid, profits are ALWAYS non-negative, paths are ALWAYS valid
-    *   **Fuzz testing**: Use Echidna/Foundry fuzzing to discover edge cases in numeric inputs (amounts, slippage, deadlines)
-    *   **Formal verification**: Use Halmos for critical functions (executeOperation, slippage validation, access control)
-    *   **Fork testing**: Test against real mainnet state using `forge --fork-url $MAINNET_RPC_URL`
+**Project Defenses**:
+*   ✅ OpenZeppelin's `Ownable` pattern restricts privileged functions to contract owner
+*   ✅ `trustedInitiators` mapping prevents unauthorized flash loan execution
+*   ✅ `onlyOwner` modifier on all configuration functions (setRouterWhitelist, setTokenWhitelist, setDexAdapter, approveAdapter)
+*   ✅ `executeOperation` validates that `opInitiator == owner()` before executing arbitrage
+*   ✅ Two-step adapter approval (address + bytecode hash) prevents privilege escalation
 
-## 8. Specific Agent Instructions & Known Issues
+**AI Agent Requirements**:
+*   **NEVER** bypass access control modifiers
+*   **ALWAYS** use `onlyOwner` for privileged operations
+*   **VERIFY** caller identity in callback functions (e.g., `executeOperation`)
+*   **TEST** unauthorized access attempts with `vm.expectRevert()` in Foundry tests
 
-*   **Tool Usage:**
-    *   **Foundry Commands**: Use `forge` for all compilation, testing, and deployment (`forge build`, `forge test`, `forge script`)
-    *   **Formatting**: ALWAYS run `forge fmt` before committing; use `forge fmt --check` in CI
-    *   **Gas Profiling**: Use `forge test --gas-report` to optimize gas-intensive operations
-    *   **Debugging**: Use `forge test -vvvv` for maximum verbosity with stack traces and internal calls
-    *   **Forking**: Test against mainnet state using `forge test --fork-url $MAINNET_RPC_URL --fork-block-number <BLOCK>`
+#### **SC02:2025 - Price Oracle Manipulation** ✅ **MITIGATED**
 
-*   **Context Management:**
-    *   **Large code changes**: Break into multiple PRs (e.g., PR1: Add adapter interface, PR2: Implement adapter, PR3: Integrate adapter)
-    *   **Security-critical changes**: Create dedicated PRs with "SECURITY" prefix and request thorough review
-    *   **Test organization**: Keep test files parallel to source files; use descriptive test names
+**Risk**: Attackers tamper with external data feeds to manipulate token prices.
 
-*   **Quality Assurance & Verification:**
-    **After making ANY code changes, you MUST:**
-    1. Run `forge build` and verify NO compilation errors
-    2. Run `forge test` and verify ALL tests pass (100% success rate)
-    3. Run `forge test --gas-report` and verify gas usage is reasonable (no unexpected spikes)
-    4. Run `slither .` and verify NO new critical/high severity issues
-    5. Run `forge fmt --check` and verify formatting compliance
-    6. **If ANY check fails**, debug and fix before considering the task complete
-    
-    **DO NOT claim task completion unless ALL programmatic checks pass.**
+**Project Defenses**:
+*   ✅ On-chain slippage protection via `maxSlippageBps` (default 2%, max 10%)
+*   ✅ Post-swap balance validation (`require(balanceAfterFirstSwap >= out1)`)
+*   ✅ Minimum acceptable output calculation: `minAcceptableOutput = (_amount * (10000 - maxSlippageBps)) / 10000`
+*   ✅ DEX router whitelisting prevents interaction with manipulated/malicious AMMs
+*   ✅ Path validation ensures arbitrage loops are closed (same token in/out)
 
-*   **Project-Specific Quirks/Antipatterns:**
-    *   **Infinite Approvals**: The contract uses infinite approvals for trusted routers to save gas; this is INTENTIONAL and security-reviewed
-    *   **String Errors**: The contract uses string-based errors (not custom error codes) for readability; this is a deliberate design choice
-    *   **WETH Handling**: The contract supports unwrapping WETH profits to ETH; ensure `receive()` function can accept ETH
-    *   **Deadline Constraints**: MAX_DEADLINE is 30 seconds; DO NOT increase without security review of MEV implications
-    *   **Adapter Pattern**: When adding new DEX support, create a new IDexAdapter implementation; NEVER modify the main contract for DEX-specific logic
-    *   **Mock Contracts**: Test mocks (MockRouter, MockToken) use simplified logic; DO NOT use for gas benchmarking or security analysis
+**AI Agent Requirements**:
+*   **ALWAYS** validate slippage tolerance is reasonable (<10%)
+*   **NEVER** remove balance validation checks
+*   **TEST** slippage edge cases (0%, 2%, 9.99%, 10%, 10.01%) in unit tests
+*   **CONSIDER** adding Chainlink oracle sanity checks for high-value trades (future enhancement)
 
-*   **Troubleshooting & Debugging:**
-    *   **Compilation Errors**: Check Solidity version (`pragma solidity ^0.8.21`), verify imports are correct, ensure dependencies are installed
-    *   **Test Failures**: 
-        *   Read error messages carefully (Foundry provides detailed traces)
-        *   Use `forge test -vvvv --match-test <FAILING_TEST>` for maximum verbosity
-        *   Check for incorrect assumptions (e.g., wrong exchange rates in mocks)
-        *   Verify test setup (initial balances, approvals, whitelisting)
-    *   **Gas Issues**: Use `forge test --gas-report` to identify gas-intensive operations; consider infinite approvals or storage optimizations
-    *   **Slither False Positives**: Review Slither output; some detectors may flag intentional patterns (e.g., infinite approvals); document exceptions
-    *   **Deployment Failures**: Verify RPC URL is correct, private key has sufficient ETH for gas, contract size is under 24KB limit
+#### **SC03:2025 - Logic Errors** ✅ **MITIGATED**
 
-*   **Known Limitations & Future Improvements:**
-    *   **DEX Support**: Currently supports Uniswap V2 and Sushiswap; Uniswap V3 support via adapters is planned
-    *   **Multi-Hop Paths**: Current implementation supports 2-hop arbitrage (A→B→A); multi-hop support (A→B→C→A) requires additional testing
-    *   **Gas Optimization**: Further gas optimizations possible (e.g., bitmap whitelisting, assembly optimizations) but require security-performance tradeoffs
-    *   **Upgrade Path**: UUPS proxy pattern enables upgrades; ensure upgrade scripts thoroughly test state migration
+**Risk**: Business logic deviations causing incorrect token distribution or fund loss.
+
+**Project Defenses**:
+*   ✅ Comprehensive invariant test suite (`FlashArbInvariantTest.t.sol`)
+*   ✅ Strict path validation: `path1[0] == _reserve`, `path2[path2.length - 1] == _reserve`
+*   ✅ Profit calculation verification: `profit = finalBalance - totalDebt`
+*   ✅ Flash loan repayment validation: `require(finalBalance >= totalDebt)`
+*   ✅ Intermediate token validation: `require(path2[0] == intermediate)`
+
+**AI Agent Requirements**:
+*   **ALWAYS** maintain invariants in code changes (see `invariant_` tests)
+*   **VERIFY** arithmetic logic with Echidna fuzzing before committing
+*   **TEST** profit calculation edge cases (zero profit, minimal profit, high profit)
+*   **DOCUMENT** all business logic assumptions in NatSpec comments
+
+#### **SC04:2025 - Lack of Input Validation** ✅ **MITIGATED**
+
+**Risk**: Malicious payloads bypass intended limits; incorrect function execution.
+
+**Project Defenses**:
+*   ✅ Router whitelist validation: `require(routerWhitelist[router1])`
+*   ✅ Token whitelist validation: `require(tokenWhitelist[path1[i]])`
+*   ✅ Deadline boundary checks: `require(deadline >= block.timestamp && deadline <= block.timestamp + MAX_DEADLINE)`
+*   ✅ Array length validation: `require(path1.length >= 2 && path2.length >= 2)`
+*   ✅ Zero-address checks: `require(_provider != address(0))`
+*   ✅ Adapter validation: `require(adapter.code.length > 0, "adapter-not-contract")`
+
+**AI Agent Requirements**:
+*   **ALWAYS** add `require()` statements for all public/external function parameters
+*   **NEVER** trust user-provided addresses, amounts, or array lengths
+*   **VALIDATE** boundaries: non-zero values, reasonable ranges, array length limits
+*   **TEST** invalid inputs with `vm.expectRevert()` assertions
+
+#### **SC05:2025 - Reentrancy Attacks** ✅ **MITIGATED**
+
+**Risk**: Exploiting withdrawal functions through recursive calls to drain funds.
+
+**Project Defenses**:
+*   ✅ OpenZeppelin's `ReentrancyGuard` on all owner functions
+*   ✅ `nonReentrant` modifier on: setRouterWhitelist, setTrustedInitiator, setDexAdapter, approveAdapter, approveAdapterCodeHash
+*   ✅ Check-Effects-Interactions pattern: state updates before external calls
+*   ✅ Profit accounting updated before withdrawal in `withdraw()` function
+*   ✅ Adapter validation runtime checks prevent malicious reentrancy via adapters
+
+**AI Agent Requirements**:
+*   **ALWAYS** follow Check-Effects-Interactions pattern: 1) Validate, 2) Update state, 3) External call
+*   **NEVER** remove `nonReentrant` modifiers from existing functions
+*   **ADD** `nonReentrant` to any new function making external calls
+*   **TEST** reentrancy attacks using mock contracts that attempt recursive calls
+
+#### **SC06:2025 & SC10:2023 - Unchecked External Calls** ✅ **MITIGATED**
+
+**Risk**: Failures in verifying external call results cause unintended consequences.
+
+**Project Defenses**:
+*   ✅ Balance validation after every swap: `require(balanceAfterFirstSwap >= out1)`
+*   ✅ Total debt repayment check: `require(finalBalance >= totalDebt)`
+*   ✅ Allowance verification before approvals: `if (IERC20(_reserve).allowance(...) < totalDebt)`
+*   ✅ SafeERC20 library usage for all token interactions (handles non-standard ERC20s)
+*   ✅ Adapter execution wrapped with approval validation
+
+**AI Agent Requirements**:
+*   **ALWAYS** use SafeERC20's `safeTransfer`, `safeTransferFrom`, `safeApprove`
+*   **NEVER** assume external calls succeed without validation
+*   **CHECK** return values or use try-catch blocks for critical external calls
+*   **TEST** failed external calls with mock contracts that return false/revert
+
+#### **SC07:2025 - Flash Loan Attacks** ✅ **ADDRESSED** (This IS a Flash Loan Contract)
+
+**Risk**: Manipulating liquidity via rapid multi-action transactions within single blocks.
+
+**Project Defenses**:
+*   ✅ This contract legitimately uses flash loans for arbitrage (not a vulnerability)
+*   ✅ MEV protection via 30-second deadline constraint prevents stale execution
+*   ✅ Slippage protection prevents sandwich attacks
+*   ✅ Trusted initiator validation prevents unauthorized flash loan triggers
+*   ✅ On-chain profitability validation: `require(profit >= minProfit)`
+*   ✅ Whitelist-only execution (routers, tokens, adapters) limits attack surface
+
+**AI Agent Requirements**:
+*   **UNDERSTAND** this contract intentionally executes flash loans (not a bug)
+*   **MAINTAIN** deadline enforcement (NEVER extend MAX_DEADLINE beyond 30 seconds)
+*   **PRESERVE** slippage limits and profitability checks
+*   **TEST** unprofitable scenarios (contract should revert, not lose funds)
+
+#### **SC08:2025 - Integer Overflow and Underflow** ✅ **MITIGATED**
+
+**Risk**: Fixed-size integer arithmetic errors causing severe vulnerabilities.
+
+**Project Defenses**:
+*   ✅ Solidity 0.8.21+ with automatic overflow/underflow checks (no SafeMath needed)
+*   ✅ Explicit range validation where needed: `require(bps <= 1000, "max 10% allowed")`
+*   ✅ Fuzz testing of numeric parameters via Foundry/Echidna
+*   ✅ Safe arithmetic operations: `profit = finalBalance - totalDebt` (checked by compiler)
+
+**AI Agent Requirements**:
+*   **NEVER** use `unchecked` blocks unless gas-critical and security-reviewed
+*   **ALWAYS** use Solidity 0.8.0+ for automatic overflow protection
+*   **VALIDATE** numeric inputs have reasonable bounds
+*   **TEST** boundary conditions: uint256 max, zero values, near-overflow scenarios
+
+#### **SC09:2025 - Insecure Randomness** ✅ **NOT APPLICABLE**
+
+**Risk**: Predictable RNG in sensitive functions exploitable by attackers.
+
+**Project Status**: This contract does NOT use randomness. No RNG vulnerabilities.
+
+**AI Agent Requirements**:
+*   **IF** adding any random selection (e.g., random DEX routing), use Chainlink VRF
+*   **NEVER** use `block.timestamp`, `block.number`, or `blockhash` for randomness
+*   **CONSULT** security team before implementing any stochastic features
 
 ---
 
-**CRITICAL REMINDERS FOR AI AGENTS:**
+### 7.2 OWASP Smart Contract Security Verification Standard (SCSVS) Checklist
 
-1. **SECURITY FIRST**: This is a DeFi protocol handling real value. Every code change must be security-reviewed.
-2. **TEST EVERYTHING**: 100% of new code requires comprehensive unit, fuzz, and invariant test coverage.
-3. **VALIDATE BEFORE CLAIMING COMPLETION**: Run ALL programmatic checks (build, test, lint, security analysis) and verify they pass.
+**Pre-Deployment Security Audit Checklist** (per OWASP SCSVS v0.0.1):
+
+#### **Architecture & Design**
+
+- [x] Contract follows upgradeable proxy pattern (UUPS) with proper initialization
+- [x] Separation of concerns: configuration, execution, accounting in distinct functions
+- [x] Minimal external dependencies (only battle-tested OpenZeppelin + Aave)
+- [x] No circular dependencies or complex inheritance chains
+- [x] Clear ownership model (single owner, no multi-sig complexity)
+
+#### **Access Control & Authorization**
+
+- [x] All privileged functions gated by `onlyOwner` modifier
+- [x] Callback functions validate caller identity (`initiator == address(this)`, `opInitiator == owner()`)
+- [x] Trusted initiator mapping prevents unauthorized flash loan execution
+- [x] Principle of least privilege: only owner can modify critical state
+- [x] No admin functions can be renounced accidentally (owner transfer is explicit)
+
+#### **Reentrancy Protection**
+
+- [x] `ReentrancyGuard` applied to all owner functions with external calls
+- [x] Check-Effects-Interactions pattern followed throughout
+- [x] State updates committed before external calls (profit accounting, allowances)
+- [x] Fallback function (`receive()`) properly secured (only accepts ETH, no logic)
+- [x] No cross-function reentrancy vulnerabilities (each function is atomic)
+
+#### **Arithmetic Safety**
+
+- [x] Solidity 0.8.21+ for built-in overflow/underflow protection
+- [x] No division by zero risks (all divisors validated or constant)
+- [x] Rounding errors considered in slippage calculations
+- [x] Numeric parameters have reasonable bounds (bps ≤ 1000, deadline ≤ 30s)
+
+#### **Input Validation**
+
+- [x] All public/external function parameters validated with `require()`
+- [x] Type checking at contract boundaries (address non-zero, array length ≥ 2)
+- [x] Whitelist validation before processing (routers, tokens, adapters)
+- [x] Path integrity checks (start/end tokens match reserve/intermediate)
+- [x] Deadline validation prevents execution of stale transactions
+
+#### **External Dependencies & Integrations**
+
+- [x] DEX interactions via whitelisted routers only (Uniswap V2, Sushiswap)
+- [x] Aave V2 flash loan integration validated (mainnet addresses hardcoded)
+- [x] Token whitelist prevents interaction with malicious ERC20s
+- [x] SafeERC20 handles non-standard token implementations
+- [x] No reliance on external oracles (on-chain price discovery via DEX swaps)
+
+#### **Gas Optimization & DoS Prevention**
+
+- [x] No unbounded loops (all iterations have fixed maximum size)
+- [x] Gas limits respected (no operations near block gas limit)
+- [x] Infinite approvals for trusted routers (eliminates approval transactions)
+- [x] No storage reads in loops (minimal SLOAD operations)
+- [x] Event emission for off-chain monitoring (not gas-critical paths)
+
+#### **Blockchain Data Integrity**
+
+- [x] Timestamp dependency limited to deadline validation (not used for randomness)
+- [x] Block number not used for security-critical logic
+- [x] No reliance on `tx.origin` for authentication
+- [x] `msg.sender` validated in all access-controlled functions
+
+#### **Economic Attack Resistance**
+
+- [x] Slippage protection prevents sandwich attacks
+- [x] Deadline constraints prevent MEV exploitation of stale transactions
+- [x] Profitability validation prevents forced unprofitable execution
+- [x] Whitelist-based execution limits composability attack surface
+- [x] Balance validation after every swap prevents price manipulation impact
+
+---
+
+### 7.3 Industry-Standard Security Tooling
+
+**PRIMARY TOOLS (ALWAYS RUN BEFORE EVERY PR):**
+```bash
+# Slither - Comprehensive static analysis (93+ detectors)
+slither . --exclude-dependencies --detect all
+slither . --checklist > security-checklist.md  # Generate audit checklist
+
+# Echidna - Property-based fuzzing (10,000+ runs)
+echidna-test . --contract FlashArbEchidnaTest --config echidna.yaml
+```
+
+**SECONDARY TOOLS (RUN WEEKLY OR FOR HIGH-RISK CHANGES):**
+```bash
+# Mythril - Deep security analysis via symbolic execution
+myth analyze src/FlashArbMainnetReady.sol --solv 0.8.21
+
+# Manticore - Symbolic execution for complex path exploration
+manticore src/FlashArbMainnetReady.sol --contract FlashArbMainnetReady
+
+# Semgrep - Pattern-based vulnerability detection with custom rules
+semgrep --config p/smart-contracts src/
+
+# Oyente - EVM bytecode analysis
+oyente -s src/FlashArbMainnetReady.sol
+```
+
+**OPTIONAL TOOLS (BASED ON RISK PROFILE - High-Value Deployments):**
+```bash
+# Aderyn - Rust-based fast static analysis
+aderyn analyze src/ --output security-report.json --format json
+
+# Halmos - Formal verification for critical functions
+halmos --contract FlashArbMainnetReady --function executeOperation --solver z3
+
+# Recon - Invariant testing as a service (cloud-based)
+recon test --contract src/FlashArbMainnetReady.sol --invariants test/ --parallel 8
+```
+
+**Tool Integration Matrix:**
+
+| Tool | Purpose | When to Use | CI/CD Integration |
+|------|---------|-------------|-------------------|
+| **Slither** | Dataflow analysis, code optimization | Every PR (mandatory) | Pre-commit hook + GitHub Actions |
+| **Echidna** | Property-based fuzzing | Every PR (mandatory) | Weekly scheduled run |
+| **Mythril** | Symbolic execution, bytecode inspection | High-risk changes | Manual before audit |
+| **Manticore** | Complex path exploration | Multi-signature, complex logic | Manual before mainnet deploy |
+| **Semgrep** | Custom security pattern detection | Weekly security scan | GitHub Actions weekly |
+| **Aderyn** | Fast static analysis (Rust) | Large codebase changes | Optional CI job |
+| **Halmos** | Formal verification | Critical function changes | Manual for auditor review |
+| **Recon** | Cloud invariant testing | Pre-mainnet deployment | Scheduled after major releases |
+
+---
+
+### 7.4 Pre-Deployment Security Workflow
+
+**MANDATORY CHECKLIST BEFORE MAINNET DEPLOYMENT:**
+
+1. **✅ Unit Test Coverage ≥ 95%**
+```bash
+   forge coverage
+   # Verify coverage report shows ≥95% line coverage for src/FlashArbMainnetReady.sol
+```
+
+2. **✅ All Static Analysis Tools Pass**
+```bash
+   slither . --exclude-dependencies  # Must show 0 critical/high issues
+   semgrep --config p/smart-contracts src/  # Must pass all security rules
+```
+
+3. **✅ Fuzz Testing Completes 10,000+ Runs**
+```bash
+   forge test --fuzz-runs 10000  # All fuzz tests must pass
+   echidna-test . --contract FlashArbEchidnaTest  # All properties must hold
+```
+
+4. **✅ Invariant Tests Validate System Properties**
+```bash
+   forge test --match-contract Invariant  # All invariants must pass
+   # Verify: Flash loan repayment, profit accuracy, path validity
+```
+
+5. **✅ Manual Code Review Against OWASP Top 10**
+   - [ ] SC01: Access control reviewed (2 reviewers)
+   - [ ] SC02: Oracle manipulation risks assessed
+   - [ ] SC03: Logic errors validated via invariant tests
+   - [ ] SC04: Input validation comprehensive
+   - [ ] SC05: Reentrancy protections verified
+   - [ ] SC06/SC10: External calls checked
+   - [ ] SC07: Flash loan security reviewed
+   - [ ] SC08: Arithmetic safety confirmed
+   - [ ] SC09: No randomness used (N/A)
+
+6. **✅ Gas Profiling Analyzed**
+```bash
+   forge test --gas-report
+   # Verify no functions exceed 5M gas (stay well under block gas limit)
+```
+
+7. **✅ Upgrade Safety Validated**
+```bash
+   # Verify storage layout compatibility with existing proxy
+   forge inspect FlashArbMainnetReady storage --pretty
+```
+
+8. **✅ Professional Security Audit (External)**
+   - [ ] Audit by reputable firm (OpenZeppelin, Trail of Bits, Consensys Diligence)
+   - [ ] All critical/high findings resolved
+   - [ ] Medium findings mitigated or accepted with documentation
+   - [ ] Audit report published before mainnet launch
+
+9. **✅ Testnet Deployment & Validation**
+```bash
+   # Deploy to Sepolia testnet
+   forge script script/Deploy.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast
+   # Execute real arbitrage scenarios on testnet for 48 hours minimum
+```
+
+10. **✅ Mainnet Deployment Checklist**
+    - [ ] Multi-sig ownership transfer plan documented
+    - [ ] Emergency pause mechanism tested
+    - [ ] Upgrade timelock configured (if applicable)
+    - [ ] Monitoring alerts configured (large withdrawals, failed transactions)
+    - [ ] Bug bounty program launched (e.g., Immunefi, Code4rena)
+
+---
+
+### 7.5 Key Distinctions from Traditional OWASP
+
+**Critical differences for AI agents working on smart contracts vs. web applications:**
+
+#### **Immutable Code - No Patches After Deployment**
+*   **Web Apps**: Deploy hotfix in minutes
+*   **Smart Contracts**: Upgradeability via proxy is complex; prevention is the ONLY defense
+*   **AI Impact**: **EVERY code change must be perfect**. No room for "we'll fix it later."
+
+#### **Economic Attacks Unique to DeFi**
+*   **Not in Web OWASP**: Flash loans, oracle manipulation, MEV extraction, liquidity attacks
+*   **Smart Contract Reality**: Attackers profit directly from exploits (financial incentive)
+*   **AI Impact**: **Must understand economic incentives**, not just technical vulnerabilities
+
+#### **Composability Risk - Protocol Interdependencies**
+*   **Web Apps**: Isolated systems with defined API boundaries
+*   **Smart Contracts**: Permissionless interaction; one protocol's bug cascades across ecosystem
+*   **AI Impact**: **Consider downstream effects** of any state change on other protocols
+
+#### **Formal Verification Matters More**
+*   **Web Apps**: Unit tests sufficient for most logic
+*   **Smart Contracts**: Mathematical proofs of correctness critical for high-value protocols
+*   **AI Impact**: **Invest in formal methods** (Halmos, Certora) for critical functions
+
+#### **Financial Stakes - Higher Bar for Security**
+*   **Web Apps**: Data breach → reputation damage
+*   **Smart Contracts**: Vulnerability → $100M+ loss in hours (see 2024 loss data)
+*   **AI Impact**: **Security is existential**, not just "important"
+
+---
+
+### 7.6 Sensitive Data Handling
+
+*   **NEVER** commit private keys, mnemonics, or API keys to version control
+*   Use environment variables (`.env`) for all sensitive configuration
+*   **NEVER** log sensitive data (keys, balances, addresses) in production
+*   Store mainnet RPC URLs and API keys in secure password managers
+*   **NEVER** include `.env` files in Git (verify `.gitignore` includes `.env`)
+*   Use hardware wallets (Ledger, Trezor) for mainnet deployments
+
+---
+
+### 7.7 Smart Contract Security Resources
+
+**Official Frameworks:**
+*   [OWASP Smart Contract Top 10](https://owasp.org/www-project-smart-contract-top-10/) - Primary vulnerability classification
+*   [OWASP SCSVS](https://owasp.org/www-project-smart-contract-security-verification-standard/) - Comprehensive security standard
+
+**Community Resources:**
+*   [Solidity Security Audit Checklist (GitHub)](https://github.com/iAnonymous3000/solidity-security-audit-checklist) - Community-maintained checklist
+*   [OpenZeppelin Audit Readiness Guide](https://learn.openzeppelin.com/security-audits/readiness-guide) - Pre-audit preparation
+
+**Continuous Learning:**
+*   [Ethernaut](https://ethernaut.openzeppelin.com/) - Smart contract security wargames
+*   [Damn Vulnerable DeFi](https://www.damnvulnerabledefi.xyz/) - DeFi security challenges
+*   [Secureum](https://secureum.substack.com/) - Smart contract security newsletter
+
+---
+
+**CRITICAL REMINDER FOR AI AGENTS:**
+
+This is a **$1B+ risk category protocol** (flash loan arbitrage). The 2024 loss data shows:
+*   **$953.2M** lost to access control violations
+*   **$35.7M** lost to reentrancy attacks  
+*   **$33.8M** lost to flash loan exploits
+
+**EVERY line of code you write must assume an attacker with:**
+*   Unlimited computing resources
+*   Perfect knowledge of your contract's source code
+*   Strong financial incentive to exploit vulnerabilities
+*   Ability to execute attacks in single atomic transactions
+
+**When in doubt about security, STOP and request human review.**
+
+### 8.1 Security-Focused Development Checklist for AI Agents
+
+**Before writing ANY code that modifies security-critical functions:**
+
+1. **Read the OWASP Smart Contract Top 10 section above** ✅
+2. **Identify which vulnerability categories your change affects** ✅
+3. **Review existing mitigations for those categories** ✅
+4. **Write security-focused tests FIRST** (test-driven development for security)
+5. **Implement the feature with mitigations in place**
+6. **Run ALL security tools** (Slither, Echidna, Mythril)
+7. **Document security assumptions** in NatSpec comments
+8. **Request human security review** before marking task complete
+
+**Security-Critical Functions (EXTRA CAUTION REQUIRED):**
+
+*   `executeOperation()` - Core flash loan callback (reentrancy, validation, arithmetic)
+*   `setDexAdapter()` - Adapter configuration (bytecode hash validation)
+*   `approveAdapter()` / `approveAdapterCodeHash()` - Adapter security (two-step approval)
+*   `withdraw()` - Fund withdrawal (reentrancy, access control)
+*   `setRouterWhitelist()` - Router management (access control, reentrancy)
+*   `_authorizeUpgrade()` - Upgrade authorization (access control)
+
+**Security Test Template:**
+```solidity
+// Test: Negative case - unauthorized access
+function testFail_UnauthorizedAccess() public {
+    vm.prank(attacker);  // Simulate malicious actor
+    arb.criticalFunction();  // Should revert
+}
+
+// Test: Negative case - reentrancy attack
+function testFail_ReentrancyAttack() public {
+    MaliciousContract attacker = new MaliciousContract(address(arb));
+    vm.expectRevert("ReentrancyGuard: reentrant call");
+    attacker.attack();
+}
+
+// Test: Edge case - boundary validation
+function testFuzz_BoundaryValidation(uint256 amount) public {
+    vm.assume(amount > 0 && amount < type(uint128).max);
+    // Test logic...
+}
+```
+
 4. **NEVER SKIP SECURITY**: Even for "minor" changes, consider security implications and test edge cases.
 5. **DOCUMENT ASSUMPTIONS**: If you make any assumptions about contract behavior or external dependencies, document them clearly in code comments.
 
