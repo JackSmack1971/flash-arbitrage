@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {FlashArbMainnetReady} from "../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter} from "../src/UniswapV2Adapter.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
@@ -33,16 +34,23 @@ contract FlashArbEchidnaTest is Test {
         // Deploy implementation
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
 
-        // Deploy proxy
-        arb = implementation;
-
-        // Initialize as owner
+        // Deploy proxy with initialization
         vm.prank(owner);
-        arb.initialize();
+        bytes memory initCall = abi.encodeCall(FlashArbMainnetReady.initialize, ());
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
+        arb = FlashArbMainnetReady(address(proxy));
 
         // Setup adapters
         vm.prank(owner);
         adapter = new UniswapV2Adapter();
+
+        // Approve adapter and its bytecode hash
+        bytes32 adapterHash = address(adapter).codehash;
+        vm.prank(owner);
+        arb.approveAdapterCodeHash(adapterHash, true);
+        vm.prank(owner);
+        arb.approveAdapter(address(adapter), true);
+
         vm.prank(owner);
         arb.setDexAdapter(address(router1), address(adapter));
         vm.prank(owner);

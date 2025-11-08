@@ -3,11 +3,12 @@ pragma solidity ^0.8.19;
 
 import {Test} from "forge-std/Test.sol";
 import "forge-std/console.sol";
-import {FlashArbMainnetReady} from "../../src/FlashArbMainnetReady.sol";
-import {UniswapV2Adapter} from "../../src/UniswapV2Adapter.sol";
-import {MockERC20} from "../../mocks/MockERC20.sol";
-import {MockLendingPool} from "../../mocks/MockLendingPool.sol";
-import {MockRouter} from "../../mocks/MockRouter.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {FlashArbMainnetReady} from "../src/FlashArbMainnetReady.sol";
+import {UniswapV2Adapter} from "../src/UniswapV2Adapter.sol";
+import {MockERC20} from "../mocks/MockERC20.sol";
+import {MockLendingPool} from "../mocks/MockLendingPool.sol";
+import {MockRouter} from "../mocks/MockRouter.sol";
 
 contract FlashArbGasTest is Test {
     FlashArbMainnetReady arb;
@@ -33,14 +34,19 @@ contract FlashArbGasTest is Test {
         // Deploy implementation
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
 
-        // Deploy proxy
-        arb = implementation;
-
-        // Initialize
-        arb.initialize();
+        // Deploy proxy with initialization
+        bytes memory initCall = abi.encodeCall(FlashArbMainnetReady.initialize, ());
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
+        arb = FlashArbMainnetReady(address(proxy));
 
         // Setup adapters
         adapter = new UniswapV2Adapter();
+
+        // Approve adapter and its bytecode hash
+        bytes32 adapterHash = address(adapter).codehash;
+        arb.approveAdapterCodeHash(adapterHash, true);
+        arb.approveAdapter(address(adapter), true);
+
         arb.setDexAdapter(address(router1), address(adapter));
         arb.setDexAdapter(address(router2), address(adapter));
 
