@@ -11,7 +11,7 @@ jobs:
     name: Security Hard Stops
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Run Slither
         uses: crytic/slither-action@v0.3.0
@@ -47,7 +47,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Slither report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: slither-report
           path: slither-report.json
@@ -56,7 +56,7 @@ jobs:
     name: Documentation Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Check markdown files
         uses: nosborn/github-action-markdown-cli@v3.2.0
