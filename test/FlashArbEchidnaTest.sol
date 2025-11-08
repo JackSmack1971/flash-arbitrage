@@ -35,11 +35,15 @@ contract FlashArbEchidnaTest is Test {
         );
 
         // Mock hardcoded mainnet addresses that initialize() tries to call
-        vm.etch(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, hex"00"); // WETH
-        vm.etch(0x6B175474E89094C44Da98b954EedeAC495271d0F, hex"00"); // DAI
-        vm.etch(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, hex"00"); // USDC
-        vm.etch(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, hex"00"); // UNISWAP_V2_ROUTER
-        vm.etch(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F, hex"00"); // SUSHISWAP_ROUTER
+        // Deploy mock ERC20s and etch their bytecode at the hardcoded addresses
+        MockERC20 mockWETH = new MockERC20("WETH", "WETH", 18);
+        MockERC20 mockDAI = new MockERC20("DAI", "DAI", 18);
+        MockERC20 mockUSDC = new MockERC20("USDC", "USDC", 6);
+        vm.etch(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, address(mockWETH).code);
+        vm.etch(0x6B175474E89094C44Da98b954EedeAC495271d0F, address(mockDAI).code);
+        vm.etch(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, address(mockUSDC).code);
+        vm.etch(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, address(mockWETH).code); // Routers
+        vm.etch(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F, address(mockWETH).code);
 
         // Deploy mocks
         tokenA = new MockERC20("Token A", "TKA", 18);
