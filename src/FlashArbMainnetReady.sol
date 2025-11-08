@@ -100,6 +100,7 @@ interface IWETH is IERC20 {
  * @notice Custom errors for improved gas efficiency and clarity
  */
 error AdapterSecurityViolation(address adapter, string reason);
+error SlippageExceeded(uint256 expected, uint256 actual, uint256 maxBps);
 
 contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
@@ -478,6 +479,25 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         require(to != address(0), "to-zero");
         IERC20(token).safeTransfer(to, amount);
         emit Withdrawn(token, to, amount);
+    }
+
+    /**
+     * @notice Calculate minimum acceptable output based on slippage tolerance
+     * @dev Pure function for slippage calculation using basis points (BPS)
+     * @param _inputAmount The input amount for the swap
+     * @param _maxSlippageBps Maximum allowed slippage in basis points (e.g., 200 = 2%)
+     * @return Minimum acceptable output amount
+     *
+     * Formula: minOutput = inputAmount * (10000 - maxSlippageBps) / 10000
+     * Example: 100 ETH input with 200 BPS (2%) -> 98 ETH minimum output
+     *
+     * Note: Division rounds down, providing conservative (safer) minimum threshold
+     */
+    function _calculateMinOutput(uint256 _inputAmount, uint256 _maxSlippageBps) internal pure returns (uint256) {
+        // BPS calculation: 10000 = 100%, so (10000 - slippageBps) gives the minimum percentage
+        // Division by 10000 converts back from BPS to actual amount
+        // Example: 100 * (10000 - 200) / 10000 = 100 * 9800 / 10000 = 98
+        return (_inputAmount * (10000 - _maxSlippageBps)) / 10000;
     }
 
     /**
