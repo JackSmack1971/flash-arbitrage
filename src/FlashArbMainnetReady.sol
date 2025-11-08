@@ -41,6 +41,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+import "./interfaces/IDexInterfaces.sol";
 
 interface ILendingPoolAddressesProvider {
     function getLendingPool() external view returns (address);
@@ -68,28 +69,6 @@ interface IFlashLoanReceiver {
         address initiator,
         bytes calldata params
     ) external returns (bool);
-}
-
-interface IUniswapV2Router02 {
-    function swapExactTokensForTokens(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-}
-
-interface IDexAdapter {
-    function swap(
-        address router,
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline,
-        uint256 maxAllowance
-    ) external returns (uint256 amountOut);
 }
 
 interface IWETH is IERC20 {
