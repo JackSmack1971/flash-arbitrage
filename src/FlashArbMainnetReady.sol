@@ -124,7 +124,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     // ETH profits (unspecified token) tracked separately
     uint256 public ethProfits;
 
-    uint256 public maxSlippageBps = 200; // 2% (informational; callers should compute amountOutMin appropriately)
+    uint256 public maxSlippageBps = 200; // 2% maximum slippage enforced on-chain in executeOperation
     uint256 public constant MAX_DEADLINE = 30; // MEV protection: max 30 seconds deadline
 
     event FlashLoanRequested(address indexed initiator, address asset, uint256 amount);
@@ -379,6 +379,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
             uint256[] memory amounts2 = IUniswapV2Router02(router2).swapExactTokensForTokens(out1, amountOutMin2, path2, address(this), deadline);
             out2 = amounts2[amounts2.length - 1];
         }
+
+        // Security: Enforce on-chain slippage limits
+        // Calculate minimum acceptable output based on maxSlippageBps
+        // For example: if maxSlippageBps = 200 (2%), minimum output = _amount * 9800 / 10000
+        uint256 minAcceptableOutput = (_amount * (10000 - maxSlippageBps)) / 10000;
+        require(out2 >= minAcceptableOutput, "slippage-exceeds-max");
 
         uint256 totalDebt = _amount + _fee;
         uint256 finalBalance = IERC20(_reserve).balanceOf(address(this));
