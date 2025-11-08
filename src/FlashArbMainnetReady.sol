@@ -32,15 +32,16 @@ pragma solidity ^0.8.21;
  */
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+import "./interfaces/IDexInterfaces.sol";
 
 interface ILendingPoolAddressesProvider {
     function getLendingPool() external view returns (address);
@@ -70,39 +71,25 @@ interface IFlashLoanReceiver {
     ) external returns (bool);
 }
 
-interface IUniswapV2Router02 {
-    function swapExactTokensForTokens(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-}
-
-interface IDexAdapter {
-    function swap(
-        address router,
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256 amountOut);
-}
-
 interface IWETH is IERC20 {
     function deposit() external payable;
     function withdraw(uint256 wad) external;
 }
 
+/**
+ * @notice Custom errors for improved gas efficiency and clarity
+ */
+error AdapterSecurityViolation(address adapter, string reason);
+error SlippageExceeded(uint256 expected, uint256 actual, uint256 maxBps);
+error PathTooLong(uint256 pathLength, uint256 maxAllowed);
+
 contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
 
     // --- Hardcoded common mainnet addresses (verify before use) ---
-    address public constant AAVE_PROVIDER = 0xb53c1a33016b2dc2ff3653530bff1848a515c8c5;
+    address public constant AAVE_PROVIDER = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
     address public constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
-    address public constant SUSHISWAP_ROUTER = 0xd9e1CE17f2641F24aE83637ab66a2cca9C378B9F;
+    address public constant SUSHISWAP_ROUTER = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
     address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address public constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
     address public constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
@@ -124,8 +111,10 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     // ETH profits (unspecified token) tracked separately
     uint256 public ethProfits;
 
-    uint256 public maxSlippageBps = 200; // 2% maximum slippage enforced on-chain in executeOperation
+    uint256 public maxSlippageBps; // 2% maximum slippage enforced on-chain in executeOperation
     uint256 public constant MAX_DEADLINE = 30; // MEV protection: max 30 seconds deadline
+    uint256 public maxAllowance; // Configurable max token approval (default: 1 billion tokens with 18 decimals)
+    uint8 public maxPathLength; // Maximum swap path length (default: 5 allows direct + 2-hop paths)
 
     event FlashLoanRequested(address indexed initiator, address asset, uint256 amount);
     event FlashLoanExecuted(address indexed initiator, address asset, uint256 amount, uint256 fee, uint256 profit);
@@ -136,6 +125,11 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     event DexAdapterSet(address router, address adapter);
     event AdapterApproved(address indexed adapter, bytes32 codeHash, bool approved);
     event AdapterCodeHashApproved(bytes32 codeHash, bool approved);
+    event TrustedInitiatorChanged(address indexed initiator, bool trusted);
+    event MaxAllowanceUpdated(uint256 newMaxAllowance);
+    event MaxPathLengthUpdated(uint8 newMaxPathLength);
+    event MaxSlippageUpdated(uint256 newMaxSlippageBps);
+    event EmergencyWithdrawn(address indexed token, address indexed to, uint256 amount);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -143,10 +137,15 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     }
 
     function initialize() external initializer {
-        __Ownable_init(msg.sender);
+        __Ownable_init();
         __ReentrancyGuard_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
+
+        // Initialize configuration defaults
+        maxSlippageBps = 200; // 2% maximum slippage
+        maxAllowance = 1e27; // 1 billion tokens with 18 decimals
+        maxPathLength = 5; // Maximum swap path length
 
         provider = ILendingPoolAddressesProvider(AAVE_PROVIDER);
         lendingPool = provider.getLendingPool();
@@ -168,18 +167,33 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         // Security: Set owner as trusted initiator
         trustedInitiators[msg.sender] = true;
 
-        // Economic optimization: Infinite approvals for common routers
-        _setupInfiniteApprovals();
+        // Security: Setup controlled approvals for common routers using maxAllowance
+        _setupRouterApprovals();
     }
 
-    function _setupInfiniteApprovals() internal {
-        // Approve common routers for infinite spending to eliminate redundant approvals
-        IERC20(WETH).safeApprove(UNISWAP_V2_ROUTER, type(uint256).max);
-        IERC20(WETH).safeApprove(SUSHISWAP_ROUTER, type(uint256).max);
-        IERC20(DAI).safeApprove(UNISWAP_V2_ROUTER, type(uint256).max);
-        IERC20(DAI).safeApprove(SUSHISWAP_ROUTER, type(uint256).max);
-        IERC20(USDC).safeApprove(UNISWAP_V2_ROUTER, type(uint256).max);
-        IERC20(USDC).safeApprove(SUSHISWAP_ROUTER, type(uint256).max);
+    /**
+     * @notice Setup token approvals for common routers using safe approval pattern
+     * @dev Uses maxAllowance instead of infinite approvals for better security
+     * @dev Follows safeApprove(0) then safeApprove(amount) pattern for token compatibility
+     */
+    function _setupRouterApprovals() internal {
+        // WETH approvals with safe pattern (reset to 0 then set to maxAllowance)
+        IERC20(WETH).safeApprove(UNISWAP_V2_ROUTER, 0);
+        IERC20(WETH).safeApprove(UNISWAP_V2_ROUTER, maxAllowance);
+        IERC20(WETH).safeApprove(SUSHISWAP_ROUTER, 0);
+        IERC20(WETH).safeApprove(SUSHISWAP_ROUTER, maxAllowance);
+
+        // DAI approvals with safe pattern
+        IERC20(DAI).safeApprove(UNISWAP_V2_ROUTER, 0);
+        IERC20(DAI).safeApprove(UNISWAP_V2_ROUTER, maxAllowance);
+        IERC20(DAI).safeApprove(SUSHISWAP_ROUTER, 0);
+        IERC20(DAI).safeApprove(SUSHISWAP_ROUTER, maxAllowance);
+
+        // USDC approvals with safe pattern
+        IERC20(USDC).safeApprove(UNISWAP_V2_ROUTER, 0);
+        IERC20(USDC).safeApprove(UNISWAP_V2_ROUTER, maxAllowance);
+        IERC20(USDC).safeApprove(SUSHISWAP_ROUTER, 0);
+        IERC20(USDC).safeApprove(SUSHISWAP_ROUTER, maxAllowance);
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
@@ -210,6 +224,31 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     function setMaxSlippage(uint256 bps) external onlyOwner {
         require(bps <= 1000, "max 10% allowed");
         maxSlippageBps = bps;
+        emit MaxSlippageUpdated(bps);
+    }
+
+    /**
+     * @notice Set maximum token allowance for router approvals
+     * @dev Configurable limit provides control over approval amounts
+     * @param _maxAllowance New maximum allowance (must be >= 1e24 to support large operations)
+     */
+    function setMaxAllowance(uint256 _maxAllowance) external onlyOwner {
+        require(_maxAllowance >= 1e24, "Allowance too low");
+        require(_maxAllowance <= type(uint256).max, "Allowance overflow");
+        maxAllowance = _maxAllowance;
+        emit MaxAllowanceUpdated(_maxAllowance);
+    }
+
+    /**
+     * @notice Set maximum path length for swap paths
+     * @dev Prevents gas DOS attacks from excessively long paths
+     * @param _maxPathLength New maximum path length (2-10 hops)
+     */
+    function setMaxPathLength(uint8 _maxPathLength) external onlyOwner {
+        require(_maxPathLength >= 2, "Path length too short");
+        require(_maxPathLength <= 10, "Path length too long");
+        maxPathLength = _maxPathLength;
+        emit MaxPathLengthUpdated(_maxPathLength);
     }
 
     /**
@@ -263,9 +302,13 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     /**
      * @notice Set trusted initiator status
      * @dev Protected with nonReentrant to prevent malicious adapter reentrancy attacks
+     * @dev Owner is automatically trusted in initialize() and should not be removed
+     * @param initiator Address to grant or revoke trusted status
+     * @param trusted True to allow initiator to execute operations, false to revoke
      */
     function setTrustedInitiator(address initiator, bool trusted) external onlyOwner nonReentrant {
         trustedInitiators[initiator] = trusted;
+        emit TrustedInitiatorChanged(initiator, trusted);
     }
 
     // params encoding helper (off-chain):
@@ -315,16 +358,26 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
             uint256 deadline
         ) = abi.decode(params, (address, address, address[], address[], uint256, uint256, uint256, bool, address, uint256));
 
-        // Security: Validate trusted initiator
+        // Security: Validate trusted initiator (single source of truth for access control)
+        // Owner is automatically trusted via initialize(). Additional addresses can be
+        // delegated via setTrustedInitiator() for bot/operator access.
         require(trustedInitiators[opInitiator], "initiator-not-trusted");
 
         // Architectural: Invariant checks
         require(routerWhitelist[router1] && routerWhitelist[router2], "router-not-allowed");
         require(path1.length >= 2 && path2.length >= 2, "invalid-paths");
+
+        // Security: Validate path lengths before expensive whitelist iteration (gas DOS prevention)
+        if (path1.length > maxPathLength) {
+            revert PathTooLong(path1.length, maxPathLength);
+        }
+        if (path2.length > maxPathLength) {
+            revert PathTooLong(path2.length, maxPathLength);
+        }
+
         require(path1[0] == _reserve, "path1 must start with reserve");
         require(path2[path2.length - 1] == _reserve, "path2 must end with reserve");
         require(initiator == address(this), "initiator-must-be-contract");
-        require(opInitiator == owner(), "opInitiator-must-be-owner");
 
         // MEV protection: Enforce max deadline
         require(deadline >= block.timestamp && deadline <= block.timestamp + MAX_DEADLINE, "deadline-invalid");
@@ -346,13 +399,32 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         if (address(dexAdapters[router1]) != address(0)) {
             // Security: Validate adapter is still approved before calling
             address adapter1 = address(dexAdapters[router1]);
-            require(approvedAdapters[adapter1], "adapter1-not-approved");
-            require(approvedAdapterCodeHashes[adapter1.codehash], "adapter1-code-hash-not-approved");
 
-            out1 = dexAdapters[router1].swap(router1, _amount, amountOutMin1, path1, address(this), deadline);
+            // Enhanced security: Verify adapter is a contract
+            if (!_isContract(adapter1)) {
+                revert AdapterSecurityViolation(adapter1, "Adapter must be a contract");
+            }
+
+            // Security: Validate adapter address is approved
+            if (!approvedAdapters[adapter1]) {
+                revert AdapterSecurityViolation(adapter1, "Adapter not approved");
+            }
+
+            // Security: Validate adapter bytecode hash is approved (prevents code substitution)
+            if (!approvedAdapterCodeHashes[adapter1.codehash]) {
+                revert AdapterSecurityViolation(adapter1, "Adapter bytecode not approved");
+            }
+
+            out1 = dexAdapters[router1].swap(router1, _amount, amountOutMin1, path1, address(this), deadline, maxAllowance);
         } else {
             uint256[] memory amounts1 = IUniswapV2Router02(router1).swapExactTokensForTokens(_amount, amountOutMin1, path1, address(this), deadline);
             out1 = amounts1[amounts1.length - 1];
+        }
+
+        // Security: Enforce slippage limit on first swap
+        uint256 minOut1 = _calculateMinOutput(_amount, maxSlippageBps);
+        if (out1 < minOut1) {
+            revert SlippageExceeded(minOut1, out1, maxSlippageBps);
         }
 
         address intermediate = path1[path1.length - 1];
@@ -371,20 +443,35 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         if (address(dexAdapters[router2]) != address(0)) {
             // Security: Validate adapter is still approved before calling
             address adapter2 = address(dexAdapters[router2]);
-            require(approvedAdapters[adapter2], "adapter2-not-approved");
-            require(approvedAdapterCodeHashes[adapter2.codehash], "adapter2-code-hash-not-approved");
 
-            out2 = dexAdapters[router2].swap(router2, out1, amountOutMin2, path2, address(this), deadline);
+            // Enhanced security: Verify adapter is a contract
+            if (!_isContract(adapter2)) {
+                revert AdapterSecurityViolation(adapter2, "Adapter must be a contract");
+            }
+
+            // Security: Validate adapter address is approved
+            if (!approvedAdapters[adapter2]) {
+                revert AdapterSecurityViolation(adapter2, "Adapter not approved");
+            }
+
+            // Security: Validate adapter bytecode hash is approved (prevents code substitution)
+            if (!approvedAdapterCodeHashes[adapter2.codehash]) {
+                revert AdapterSecurityViolation(adapter2, "Adapter bytecode not approved");
+            }
+
+            out2 = dexAdapters[router2].swap(router2, out1, amountOutMin2, path2, address(this), deadline, maxAllowance);
         } else {
             uint256[] memory amounts2 = IUniswapV2Router02(router2).swapExactTokensForTokens(out1, amountOutMin2, path2, address(this), deadline);
             out2 = amounts2[amounts2.length - 1];
         }
 
-        // Security: Enforce on-chain slippage limits
-        // Calculate minimum acceptable output based on maxSlippageBps
-        // For example: if maxSlippageBps = 200 (2%), minimum output = _amount * 9800 / 10000
-        uint256 minAcceptableOutput = (_amount * (10000 - maxSlippageBps)) / 10000;
-        require(out2 >= minAcceptableOutput, "slippage-exceeds-max");
+        // Security: Enforce slippage limit on second swap
+        // Note: On-chain slippage enforcement provides stronger guarantees than off-chain
+        // validation, as it cannot be bypassed by front-running or stale price data
+        uint256 minOut2 = _calculateMinOutput(out1, maxSlippageBps);
+        if (out2 < minOut2) {
+            revert SlippageExceeded(minOut2, out2, maxSlippageBps);
+        }
 
         uint256 totalDebt = _amount + _fee;
         uint256 finalBalance = IERC20(_reserve).balanceOf(address(this));
@@ -446,7 +533,41 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     function emergencyWithdrawERC20(address token, uint256 amount, address to) external onlyOwner nonReentrant {
         require(to != address(0), "to-zero");
         IERC20(token).safeTransfer(to, amount);
-        emit Withdrawn(token, to, amount);
+        emit EmergencyWithdrawn(token, to, amount);
+    }
+
+    /**
+     * @notice Calculate minimum acceptable output based on slippage tolerance
+     * @dev Pure function for slippage calculation using basis points (BPS)
+     * @param _inputAmount The input amount for the swap
+     * @param _maxSlippageBps Maximum allowed slippage in basis points (e.g., 200 = 2%)
+     * @return Minimum acceptable output amount
+     *
+     * Formula: minOutput = inputAmount * (10000 - maxSlippageBps) / 10000
+     * Example: 100 ETH input with 200 BPS (2%) -> 98 ETH minimum output
+     *
+     * Note: Division rounds down, providing conservative (safer) minimum threshold
+     */
+    function _calculateMinOutput(uint256 _inputAmount, uint256 _maxSlippageBps) internal pure returns (uint256) {
+        // BPS calculation: 10000 = 100%, so (10000 - slippageBps) gives the minimum percentage
+        // Division by 10000 converts back from BPS to actual amount
+        // Example: 100 * (10000 - 200) / 10000 = 100 * 9800 / 10000 = 98
+        return (_inputAmount * (10000 - _maxSlippageBps)) / 10000;
+    }
+
+    /**
+     * @notice Internal helper to check if address is a contract
+     * @dev Uses extcodesize to determine if address contains code
+     * @param account Address to check
+     * @return True if account is a contract, false otherwise
+     */
+    function _isContract(address account) internal view returns (bool) {
+        // Check if account has code deployed
+        uint256 size;
+        assembly {
+            size := extcodesize(account)
+        }
+        return size > 0;
     }
 
     // Allow contract to receive ETH

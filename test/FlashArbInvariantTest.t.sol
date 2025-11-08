@@ -2,11 +2,12 @@
 pragma solidity ^0.8.19;
 
 import {Test} from "forge-std/Test.sol";
-import {FlashArbMainnetReady} from "../../src/FlashArbMainnetReady.sol";
-import {UniswapV2Adapter} from "../../src/UniswapV2Adapter.sol";
-import {MockERC20} from "../../mocks/MockERC20.sol";
-import {MockLendingPool} from "../../mocks/MockLendingPool.sol";
-import {MockRouter} from "../../mocks/MockRouter.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {FlashArbMainnetReady} from "../src/FlashArbMainnetReady.sol";
+import {UniswapV2Adapter} from "../src/UniswapV2Adapter.sol";
+import {MockERC20} from "../mocks/MockERC20.sol";
+import {MockLendingPool} from "../mocks/MockLendingPool.sol";
+import {MockRouter} from "../mocks/MockRouter.sol";
 
 contract FlashArbInvariantTest is Test {
     FlashArbMainnetReady arb;
@@ -23,6 +24,27 @@ contract FlashArbInvariantTest is Test {
     function setUp() public {
         vm.startPrank(owner);
 
+        // Mock AAVE provider at expected address
+        address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
+        address mockLendingPoolAddr = makeAddr("mockLendingPool");
+        vm.etch(aaveProvider, hex"00");
+        vm.mockCall(
+            aaveProvider,
+            abi.encodeWithSignature("getLendingPool()"),
+            abi.encode(mockLendingPoolAddr)
+        );
+
+        // Mock hardcoded mainnet addresses that initialize() tries to call
+        // Deploy mock ERC20s and etch their bytecode at the hardcoded addresses
+        MockERC20 mockWETH = new MockERC20("WETH", "WETH", 18);
+        MockERC20 mockDAI = new MockERC20("DAI", "DAI", 18);
+        MockERC20 mockUSDC = new MockERC20("USDC", "USDC", 6);
+        vm.etch(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, address(mockWETH).code);
+        vm.etch(0x6B175474E89094C44Da98b954EedeAC495271d0F, address(mockDAI).code);
+        vm.etch(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, address(mockUSDC).code);
+        vm.etch(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, address(mockWETH).code); // Routers
+        vm.etch(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F, address(mockWETH).code);
+
         // Deploy mocks
         tokenA = new MockERC20("Token A", "TKA", 18);
         tokenB = new MockERC20("Token B", "TKB", 18);
@@ -33,16 +55,32 @@ contract FlashArbInvariantTest is Test {
         // Deploy implementation
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
 
-        // Deploy proxy
-        arb = FlashArbMainnetReady(address(implementation));
-
-        // Initialize
-        arb.initialize();
+        // Deploy proxy with initialization
+        bytes memory initCall = abi.encodeCall(FlashArbMainnetReady.initialize, ());
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
+        arb = FlashArbMainnetReady(payable(address(proxy)));
 
         // Setup adapters
         adapter = new UniswapV2Adapter();
+
+        // Whitelist the mock routers
+        arb.setRouterWhitelist(address(router1), true);
+        arb.setRouterWhitelist(address(router2), true);
+
+        // Approve adapter and its bytecode hash
+        bytes32 adapterHash = address(adapter).codehash;
+        arb.approveAdapterCodeHash(adapterHash, true);
+        arb.approveAdapter(address(adapter), true);
+
         arb.setDexAdapter(address(router1), address(adapter));
         arb.setDexAdapter(address(router2), address(adapter));
+
+        // Whitelist tokens so tests can proceed past asset validation
+        arb.setTokenWhitelist(address(tokenA), true);
+        arb.setTokenWhitelist(address(tokenB), true);
+
+        // Whitelist owner as trusted initiator
+        arb.setTrustedInitiator(owner, true);
 
         vm.stopPrank();
     }
@@ -67,8 +105,8 @@ contract FlashArbInvariantTest is Test {
         uint256 loanAmount = 1000 * 10**18;
 
         // Setup profitable arbitrage
-        router1.setExchangeRate(1 * 10**18, 95 * 10**17);
-        router2.setExchangeRate(1 * 10**18, 105 * 10**17);
+        router1.setExchangeRate(95 * 10**17);
+        router2.setExchangeRate(105 * 10**17);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 
@@ -213,8 +251,8 @@ contract FlashArbInvariantTest is Test {
         uint256 loanAmount = 1000 * 10**18;
 
         // Setup unprofitable arbitrage
-        router1.setExchangeRate(1 * 10**18, 50 * 10**17);
-        router2.setExchangeRate(1 * 10**18, 50 * 10**17);
+        router1.setExchangeRate(50 * 10**17);
+        router2.setExchangeRate(50 * 10**17);
 
         deal(address(tokenA), address(lendingPool), loanAmount);
 

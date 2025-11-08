@@ -1,0 +1,74 @@
+name: Security Checks
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  security-hard-stops:
+    name: Security Hard Stops
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run tests
+        run: forge test -vv
+
+      - name: Check formatting
+        run: forge fmt --check
+
+      - name: Block infinite approvals
+        run: |
+          if grep -r "type(uint256).max" src/; then
+            echo "ERROR: Infinite approval detected in src/"
+            exit 1
+          fi
+          echo "✓ No infinite approvals found"
+
+  security-warnings:
+    name: Security Warnings
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Slither
+        uses: crytic/slither-action@v0.3.0
+        with:
+          target: '.'
+          slither-args: '--filter-paths "lib/|test/" --json slither-report.json'
+        continue-on-error: true
+
+      - name: Upload Slither report
+        uses: actions/upload-artifact@v4
+        with:
+          name: slither-report
+          path: slither-report.json
+
+  documentation-checks:
+    name: Documentation Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check markdown files
+        uses: nosborn/github-action-markdown-cli@v3.2.0
+        with:
+          files: "*.md docs/*.md"
+          config_file: ".markdownlint.json"
+        continue-on-error: true
+
+      - name: Verify SECURITY.md exists
+        run: |
+          if [ ! -f "docs/SECURITY.md" ]; then
+            echo "ERROR: docs/SECURITY.md is missing"
+            exit 1
+          fi
+          echo "✓ Security documentation found"
