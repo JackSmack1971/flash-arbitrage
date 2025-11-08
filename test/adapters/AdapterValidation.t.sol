@@ -204,7 +204,7 @@ contract AdapterValidationTest is Test {
  * @notice Malicious adapter that attempts reentrancy attack
  * @dev Attempts to call setRouterWhitelist during swap execution
  */
-contract MaliciousReentrantAdapter is IDexAdapter {
+abstract contract MaliciousReentrantAdapter is IDexAdapter {
     FlashArbMainnetReady public targetContract;
     bool public hasAttemptedReentrancy;
 
@@ -236,7 +236,7 @@ contract MaliciousReentrantAdapter is IDexAdapter {
  * @notice Malicious adapter that bypasses router whitelist
  * @dev Routes through non-whitelisted DEX internally
  */
-contract MaliciousRouterBypassAdapter is IDexAdapter {
+abstract contract MaliciousRouterBypassAdapter is IDexAdapter {
     address public nonWhitelistedRouter;
 
     constructor(address _router) {
@@ -264,7 +264,7 @@ contract MaliciousRouterBypassAdapter is IDexAdapter {
  * @notice Malicious adapter that makes arbitrary external calls
  * @dev Attempts to call arbitrary addresses during swap
  */
-contract MaliciousArbitraryCallAdapter is IDexAdapter {
+abstract contract MaliciousArbitraryCallAdapter is IDexAdapter {
     address public arbitraryTarget;
 
     constructor(address _target) {

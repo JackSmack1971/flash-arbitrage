@@ -276,7 +276,7 @@ contract SlippageEnforcementTest is Test {
 /**
  * @notice Mock adapter that simulates poor swap returns (high slippage)
  */
-contract MockPoorSwapAdapter is IDexAdapter {
+abstract contract MockPoorSwapAdapter is IDexAdapter {
     uint256 public returnBps; // Return percentage in BPS (e.g., 9700 = 97%)
 
     constructor(uint256 _returnBps) {
@@ -303,7 +303,7 @@ contract MockPoorSwapAdapter is IDexAdapter {
 /**
  * @notice Mock adapter that simulates good swap returns (acceptable slippage)
  */
-contract MockGoodSwapAdapter is IDexAdapter {
+abstract contract MockGoodSwapAdapter is IDexAdapter {
     uint256 public returnBps;
 
     constructor(uint256 _returnBps) {
@@ -326,7 +326,7 @@ contract MockGoodSwapAdapter is IDexAdapter {
 /**
  * @notice Mock adapter that simulates loss-making swaps
  */
-contract MockLossAdapter is IDexAdapter {
+abstract contract MockLossAdapter is IDexAdapter {
     uint256 public returnBps;
 
     constructor(uint256 _returnBps) {
