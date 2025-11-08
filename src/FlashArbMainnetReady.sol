@@ -357,8 +357,15 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
                 revert AdapterSecurityViolation(adapter1, "Adapter must be a contract");
             }
 
-            require(approvedAdapters[adapter1], "adapter1-not-approved");
-            require(approvedAdapterCodeHashes[adapter1.codehash], "adapter1-code-hash-not-approved");
+            // Security: Validate adapter address is approved
+            if (!approvedAdapters[adapter1]) {
+                revert AdapterSecurityViolation(adapter1, "Adapter not approved");
+            }
+
+            // Security: Validate adapter bytecode hash is approved (prevents code substitution)
+            if (!approvedAdapterCodeHashes[adapter1.codehash]) {
+                revert AdapterSecurityViolation(adapter1, "Adapter bytecode not approved");
+            }
 
             out1 = dexAdapters[router1].swap(router1, _amount, amountOutMin1, path1, address(this), deadline);
         } else {
@@ -388,8 +395,15 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
                 revert AdapterSecurityViolation(adapter2, "Adapter must be a contract");
             }
 
-            require(approvedAdapters[adapter2], "adapter2-not-approved");
-            require(approvedAdapterCodeHashes[adapter2.codehash], "adapter2-code-hash-not-approved");
+            // Security: Validate adapter address is approved
+            if (!approvedAdapters[adapter2]) {
+                revert AdapterSecurityViolation(adapter2, "Adapter not approved");
+            }
+
+            // Security: Validate adapter bytecode hash is approved (prevents code substitution)
+            if (!approvedAdapterCodeHashes[adapter2.codehash]) {
+                revert AdapterSecurityViolation(adapter2, "Adapter bytecode not approved");
+            }
 
             out2 = dexAdapters[router2].swap(router2, out1, amountOutMin2, path2, address(this), deadline);
         } else {
