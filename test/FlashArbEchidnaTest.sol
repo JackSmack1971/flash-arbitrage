@@ -38,7 +38,7 @@ contract FlashArbEchidnaTest is Test {
         vm.prank(owner);
         bytes memory initCall = abi.encodeCall(FlashArbMainnetReady.initialize, ());
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
-        arb = FlashArbMainnetReady(address(proxy));
+        arb = FlashArbMainnetReady(payable(address(proxy)));
 
         // Setup adapters
         vm.prank(owner);
