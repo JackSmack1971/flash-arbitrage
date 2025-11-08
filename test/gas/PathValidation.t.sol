@@ -4,6 +4,7 @@ pragma solidity ^0.8.21;
 import "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
+import {MockERC20} from "../../mocks/MockERC20.sol";
 
 /**
  * @title PathValidation Test Suite
