@@ -6,6 +6,8 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/UniswapV2Adapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockERC20} from "../../mocks/MockERC20.sol";
+import {MockRouter} from "../../mocks/MockRouter.sol";
 
 /**
  * @title AdapterValidation Test Suite
@@ -22,15 +24,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract AdapterValidationTest is Test {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public legitimateAdapter;
+    MockERC20 public weth;
+    MockERC20 public dai;
+    MockRouter public uniswapRouter;
+    MockRouter public sushiswapRouter;
 
     address public owner;
     address public attacker;
-
-    // Mainnet constants
-    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
-    address constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
-    address constant SUSHISWAP_ROUTER = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
 
     function setUp() public {
         owner = address(this);
@@ -47,6 +47,14 @@ contract AdapterValidationTest is Test {
             abi.encodeWithSignature("getLendingPool()"),
             abi.encode(mockLendingPool)
         );
+
+        // Deploy mock tokens
+        weth = new MockERC20("Wrapped Ether", "WETH", 18);
+        dai = new MockERC20("Dai Stablecoin", "DAI", 18);
+
+        // Deploy mock routers
+        uniswapRouter = new MockRouter(address(weth), address(dai));
+        sushiswapRouter = new MockRouter(address(dai), address(weth));
 
         // Deploy implementation
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
@@ -78,22 +86,22 @@ contract AdapterValidationTest is Test {
         // Try to approve malicious adapter (this might succeed initially)
         flashArb.approveAdapterCodeHash(maliciousHash, true);
         flashArb.approveAdapter(address(maliciousAdapter), true);
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(maliciousAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(maliciousAdapter));
 
         vm.stopPrank();
 
         // Prepare flash loan parameters
         address[] memory path1 = new address[](2);
-        path1[0] = WETH;
-        path1[1] = DAI;
+        path1[0] = address(weth);
+        path1[1] = address(dai);
 
         address[] memory path2 = new address[](2);
-        path2[0] = DAI;
-        path2[1] = WETH;
+        path2[0] = address(dai);
+        path2[1] = address(weth);
 
         bytes memory params = abi.encode(
-            UNISWAP_V2_ROUTER, // router1
-            SUSHISWAP_ROUTER,  // router2
+            address(uniswapRouter), // router1
+            address(sushiswapRouter),  // router2
             path1,
             path2,
             0,                 // amountOutMin1
@@ -109,7 +117,7 @@ contract AdapterValidationTest is Test {
         vm.expectRevert(); // Will be updated to specific error once implemented
 
         vm.prank(owner);
-        flashArb.startFlashLoan(WETH, 1 ether, params);
+        flashArb.startFlashLoan(address(weth), 1 ether, params);
     }
 
     /**
@@ -130,7 +138,7 @@ contract AdapterValidationTest is Test {
         // Approve the malicious adapter (should work)
         flashArb.approveAdapterCodeHash(bypassHash, true);
         flashArb.approveAdapter(address(bypassAdapter), true);
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(bypassAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(bypassAdapter));
 
         vm.stopPrank();
 
@@ -139,11 +147,11 @@ contract AdapterValidationTest is Test {
         vm.expectRevert();
 
         address[] memory path = new address[](2);
-        path[0] = WETH;
-        path[1] = DAI;
+        path[0] = address(weth);
+        path[1] = address(dai);
 
         vm.prank(address(flashArb));
-        bypassAdapter.swap(UNISWAP_V2_ROUTER, 1 ether, 0, path, address(flashArb), block.timestamp + 30, 1e27);
+        bypassAdapter.swap(address(uniswapRouter), 1 ether, 0, path, address(flashArb), block.timestamp + 30, 1e27);
     }
 
     /**
@@ -164,7 +172,7 @@ contract AdapterValidationTest is Test {
         // Approve the malicious adapter
         flashArb.approveAdapterCodeHash(arbitraryHash, true);
         flashArb.approveAdapter(address(arbitraryAdapter), true);
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(arbitraryAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(arbitraryAdapter));
 
         vm.stopPrank();
 
@@ -173,11 +181,11 @@ contract AdapterValidationTest is Test {
         vm.expectRevert();
 
         address[] memory path = new address[](2);
-        path[0] = WETH;
-        path[1] = DAI;
+        path[0] = address(weth);
+        path[1] = address(dai);
 
         vm.prank(address(flashArb));
-        arbitraryAdapter.swap(UNISWAP_V2_ROUTER, 1 ether, 0, path, address(flashArb), block.timestamp + 30, 1e27);
+        arbitraryAdapter.swap(address(uniswapRouter), 1 ether, 0, path, address(flashArb), block.timestamp + 30, 1e27);
     }
 
     /**
@@ -195,23 +203,23 @@ contract AdapterValidationTest is Test {
 
         // This should fail because bytecode hash is not approved
         vm.expectRevert("adapter-not-approved");
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(newAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(newAdapter));
 
         // Now approve the adapter address but not the bytecode hash
         flashArb.approveAdapter(address(newAdapter), true);
 
         // Should still fail due to bytecode hash not approved
         vm.expectRevert("adapter-code-hash-not-approved");
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(newAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(newAdapter));
 
         // Now approve bytecode hash
         flashArb.approveAdapterCodeHash(newAdapterHash, true);
 
         // Should succeed now
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(newAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(newAdapter));
 
         // Verify adapter is set
-        assertEq(address(flashArb.dexAdapters(UNISWAP_V2_ROUTER)), address(newAdapter));
+        assertEq(address(flashArb.dexAdapters(address(uniswapRouter))), address(newAdapter));
 
         vm.stopPrank();
     }

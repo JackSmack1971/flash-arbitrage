@@ -5,6 +5,8 @@ import "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/UniswapV2Adapter.sol";
+import {MockERC20} from "../../mocks/MockERC20.sol";
+import {MockRouter} from "../../mocks/MockRouter.sol";
 
 /**
  * @title SecurityIntegration Test Suite
@@ -14,6 +16,9 @@ import "../../src/UniswapV2Adapter.sol";
 contract SecurityIntegrationTest is Test {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public adapter;
+    MockERC20 public weth;
+    MockERC20 public dai;
+    MockRouter public uniswapRouter;
 
     function setUp() public {
         // Mock AAVE provider at expected address
@@ -27,6 +32,13 @@ contract SecurityIntegrationTest is Test {
             abi.encodeWithSignature("getLendingPool()"),
             abi.encode(mockLendingPool)
         );
+
+        // Deploy mock tokens
+        weth = new MockERC20("Wrapped Ether", "WETH", 18);
+        dai = new MockERC20("Dai Stablecoin", "DAI", 18);
+
+        // Deploy mock router
+        uniswapRouter = new MockRouter(address(weth), address(dai));
 
         // Deploy implementation
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
@@ -47,7 +59,7 @@ contract SecurityIntegrationTest is Test {
         flashArb.approveAdapter(address(adapter), true);
 
         // Should succeed with approved adapter
-        flashArb.setDexAdapter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, address(adapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(adapter));
 
         assertTrue(flashArb.approvedAdapters(address(adapter)), "Adapter not approved");
         assertTrue(flashArb.approvedAdapterCodeHashes(adapterHash), "Hash not approved");

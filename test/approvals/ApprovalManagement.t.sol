@@ -6,6 +6,8 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/UniswapV2Adapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockERC20} from "../../mocks/MockERC20.sol";
+import {MockRouter} from "../../mocks/MockRouter.sol";
 
 /**
  * @title ApprovalManagement Test Suite
@@ -22,17 +24,17 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract ApprovalManagementTest is Test {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public adapter;
+    MockERC20 public weth;
+    MockERC20 public dai;
+    MockERC20 public usdc;
+    MockRouter public uniswapRouter;
+    MockRouter public sushiswapRouter;
 
     address public owner;
 
-    // Mainnet constants
-    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
-    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
-    address constant SUSHISWAP_ROUTER = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
-
     function setUp() public {
+        owner = address(this);
+
         // Mock AAVE provider at expected address
         address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
         address mockLendingPool = makeAddr("mockLendingPool");
@@ -44,6 +46,15 @@ contract ApprovalManagementTest is Test {
             abi.encodeWithSignature("getLendingPool()"),
             abi.encode(mockLendingPool)
         );
+
+        // Deploy mock tokens
+        weth = new MockERC20("Wrapped Ether", "WETH", 18);
+        dai = new MockERC20("Dai Stablecoin", "DAI", 18);
+        usdc = new MockERC20("USD Coin", "USDC", 6);
+
+        // Deploy mock routers
+        uniswapRouter = new MockRouter(address(weth), address(dai));
+        sushiswapRouter = new MockRouter(address(dai), address(weth));
 
         // Deploy implementation
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
@@ -85,10 +96,10 @@ contract ApprovalManagementTest is Test {
         // Prepare paths using mock token
         address[] memory path1 = new address[](2);
         path1[0] = address(mockToken);
-        path1[1] = DAI;
+        path1[1] = address(dai);
 
         address[] memory path2 = new address[](2);
-        path2[0] = DAI;
+        path2[0] = address(dai);
         path2[1] = address(mockToken);
 
         // The mock token will track if approve(0) was called before approve(amount)
@@ -126,14 +137,18 @@ contract ApprovalManagementTest is Test {
      * Expected: Approvals use maxAllowance parameter, not hardcoded max
      */
     function testNoInfiniteApprovalsByDefault() public {
-        // Deploy a fresh contract
-        FlashArbMainnetReady freshContract = new FlashArbMainnetReady();
-        freshContract.initialize();
+        // Deploy a fresh implementation
+        FlashArbMainnetReady freshImplementation = new FlashArbMainnetReady();
+
+        // Deploy proxy with initialization
+        bytes memory initCall = abi.encodeCall(FlashArbMainnetReady.initialize, ());
+        ERC1967Proxy freshProxy = new ERC1967Proxy(address(freshImplementation), initCall);
+        FlashArbMainnetReady freshContract = FlashArbMainnetReady(payable(address(freshProxy)));
 
         // Check allowances set during initialization
         // None should be type(uint256).max
-        uint256 wethUniswapAllowance = IERC20(WETH).allowance(address(freshContract), UNISWAP_V2_ROUTER);
-        uint256 wethSushiAllowance = IERC20(WETH).allowance(address(freshContract), SUSHISWAP_ROUTER);
+        uint256 wethUniswapAllowance = IERC20(address(weth)).allowance(address(freshContract), address(uniswapRouter));
+        uint256 wethSushiAllowance = IERC20(address(weth)).allowance(address(freshContract), address(sushiswapRouter));
 
         // Current code sets these to type(uint256).max (infinite)
         // After AT-011, these should be set to maxAllowance (configurable, finite)
@@ -164,9 +179,9 @@ contract ApprovalManagementTest is Test {
         flashArb.setRouterWhitelist(testRouter, false);
 
         // Check that allowances for this router are reset
-        uint256 wethAllowance = IERC20(WETH).allowance(address(flashArb), testRouter);
-        uint256 daiAllowance = IERC20(DAI).allowance(address(flashArb), testRouter);
-        uint256 usdcAllowance = IERC20(USDC).allowance(address(flashArb), testRouter);
+        uint256 wethAllowance = IERC20(address(weth)).allowance(address(flashArb), testRouter);
+        uint256 daiAllowance = IERC20(address(dai)).allowance(address(flashArb), testRouter);
+        uint256 usdcAllowance = IERC20(address(usdc)).allowance(address(flashArb), testRouter);
 
         // After implementation, these should all be 0
         // assertEq(wethAllowance, 0, "WETH allowance should be reset");

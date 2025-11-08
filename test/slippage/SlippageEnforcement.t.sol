@@ -6,6 +6,8 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/UniswapV2Adapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockERC20} from "../../mocks/MockERC20.sol";
+import {MockRouter} from "../../mocks/MockRouter.sol";
 
 /**
  * @title SlippageEnforcement Test Suite
@@ -23,18 +25,19 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract SlippageEnforcementTest is Test {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public adapter;
+    MockERC20 public weth;
+    MockERC20 public dai;
+    MockERC20 public usdc;
+    MockRouter public uniswapRouter;
+    MockRouter public sushiswapRouter;
 
     address public owner;
     address public user;
 
-    // Mainnet constants
-    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
-    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
-    address constant SUSHISWAP_ROUTER = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
-
     function setUp() public {
+        owner = address(this);
+        user = makeAddr("user");
+
         // Mock AAVE provider at expected address
         address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
         address mockLendingPool = makeAddr("mockLendingPool");
@@ -46,6 +49,15 @@ contract SlippageEnforcementTest is Test {
             abi.encodeWithSignature("getLendingPool()"),
             abi.encode(mockLendingPool)
         );
+
+        // Deploy mock tokens
+        weth = new MockERC20("Wrapped Ether", "WETH", 18);
+        dai = new MockERC20("Dai Stablecoin", "DAI", 18);
+        usdc = new MockERC20("USD Coin", "USDC", 6);
+
+        // Deploy mock routers
+        uniswapRouter = new MockRouter(address(weth), address(dai));
+        sushiswapRouter = new MockRouter(address(dai), address(weth));
 
         // Deploy implementation
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
@@ -61,8 +73,8 @@ contract SlippageEnforcementTest is Test {
         bytes32 adapterHash = address(adapter).codehash;
         flashArb.approveAdapterCodeHash(adapterHash, true);
         flashArb.approveAdapter(address(adapter), true);
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(adapter));
-        flashArb.setDexAdapter(SUSHISWAP_ROUTER, address(adapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(adapter));
+        flashArb.setDexAdapter(address(sushiswapRouter), address(adapter));
     }
 
     /**
@@ -81,20 +93,20 @@ contract SlippageEnforcementTest is Test {
         bytes32 poorHash = address(poorAdapter).codehash;
         flashArb.approveAdapterCodeHash(poorHash, true);
         flashArb.approveAdapter(address(poorAdapter), true);
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(poorAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(poorAdapter));
 
         // Prepare paths
         address[] memory path1 = new address[](2);
-        path1[0] = WETH;
-        path1[1] = DAI;
+        path1[0] = address(weth);
+        path1[1] = address(dai);
 
         address[] memory path2 = new address[](2);
-        path2[0] = DAI;
-        path2[1] = WETH;
+        path2[0] = address(dai);
+        path2[1] = address(weth);
 
         bytes memory params = abi.encode(
-            UNISWAP_V2_ROUTER,
-            SUSHISWAP_ROUTER,
+            address(uniswapRouter),
+            address(sushiswapRouter),
             path1,
             path2,
             0,
@@ -106,7 +118,7 @@ contract SlippageEnforcementTest is Test {
         );
 
         // Mock tokens in contract
-        deal(WETH, address(flashArb), 100 ether);
+        deal(address(weth), address(flashArb), 100 ether);
 
         // Expected: SlippageExceeded(expected, actual, maxBps)
         // For now using vm.expectRevert() - will be updated to specific error once implemented
@@ -114,7 +126,7 @@ contract SlippageEnforcementTest is Test {
 
         // Simulate flash loan callback
         address[] memory assets = new address[](1);
-        assets[0] = WETH;
+        assets[0] = address(weth);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1 ether;
         uint256[] memory premiums = new uint256[](1);
@@ -138,21 +150,21 @@ contract SlippageEnforcementTest is Test {
         bytes32 goodHash = address(goodAdapter).codehash;
         flashArb.approveAdapterCodeHash(goodHash, true);
         flashArb.approveAdapter(address(goodAdapter), true);
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(goodAdapter));
-        flashArb.setDexAdapter(SUSHISWAP_ROUTER, address(goodAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(goodAdapter));
+        flashArb.setDexAdapter(address(sushiswapRouter), address(goodAdapter));
 
         // Prepare paths
         address[] memory path1 = new address[](2);
-        path1[0] = WETH;
-        path1[1] = DAI;
+        path1[0] = address(weth);
+        path1[1] = address(dai);
 
         address[] memory path2 = new address[](2);
-        path2[0] = DAI;
-        path2[1] = WETH;
+        path2[0] = address(dai);
+        path2[1] = address(weth);
 
         bytes memory params = abi.encode(
-            UNISWAP_V2_ROUTER,
-            SUSHISWAP_ROUTER,
+            address(uniswapRouter),
+            address(sushiswapRouter),
             path1,
             path2,
             0,
@@ -164,12 +176,12 @@ contract SlippageEnforcementTest is Test {
         );
 
         // Mock tokens
-        deal(WETH, address(flashArb), 100 ether);
-        deal(DAI, address(flashArb), 1000000 ether);
+        deal(address(weth), address(flashArb), 100 ether);
+        deal(address(dai), address(flashArb), 1000000 ether);
 
         // Should succeed
         address[] memory assets = new address[](1);
-        assets[0] = WETH;
+        assets[0] = address(weth);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1 ether;
         uint256[] memory premiums = new uint256[](1);
@@ -236,21 +248,21 @@ contract SlippageEnforcementTest is Test {
         bytes32 lossHash = address(lossAdapter).codehash;
         flashArb.approveAdapterCodeHash(lossHash, true);
         flashArb.approveAdapter(address(lossAdapter), true);
-        flashArb.setDexAdapter(UNISWAP_V2_ROUTER, address(lossAdapter));
-        flashArb.setDexAdapter(SUSHISWAP_ROUTER, address(lossAdapter));
+        flashArb.setDexAdapter(address(uniswapRouter), address(lossAdapter));
+        flashArb.setDexAdapter(address(sushiswapRouter), address(lossAdapter));
 
         // Prepare paths
         address[] memory path1 = new address[](2);
-        path1[0] = WETH;
-        path1[1] = DAI;
+        path1[0] = address(weth);
+        path1[1] = address(dai);
 
         address[] memory path2 = new address[](2);
-        path2[0] = DAI;
-        path2[1] = WETH;
+        path2[0] = address(dai);
+        path2[1] = address(weth);
 
         bytes memory params = abi.encode(
-            UNISWAP_V2_ROUTER,
-            SUSHISWAP_ROUTER,
+            address(uniswapRouter),
+            address(sushiswapRouter),
             path1,
             path2,
             0,
@@ -261,14 +273,14 @@ contract SlippageEnforcementTest is Test {
             block.timestamp + 30
         );
 
-        deal(WETH, address(flashArb), 100 ether);
-        deal(DAI, address(flashArb), 1000000 ether);
+        deal(address(weth), address(flashArb), 100 ether);
+        deal(address(dai), address(flashArb), 1000000 ether);
 
         // Should revert due to slippage
         vm.expectRevert();
 
         address[] memory assets = new address[](1);
-        assets[0] = WETH;
+        assets[0] = address(weth);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1 ether;
         uint256[] memory premiums = new uint256[](1);
