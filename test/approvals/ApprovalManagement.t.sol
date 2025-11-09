@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-import "forge-std/Test.sol";
+import "../helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter, IFlashArbLike} from "../../src/UniswapV2Adapter.sol";
@@ -21,7 +21,7 @@ import {MockRouter} from "../../mocks/MockRouter.sol";
  * 3. No infinite approvals by default (use configurable limit)
  * 4. Approval reset on router removal from whitelist
  */
-contract ApprovalManagementTest is Test {
+contract ApprovalManagementTest is TestBase {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public adapter;
     MockERC20 public weth;
@@ -33,6 +33,9 @@ contract ApprovalManagementTest is Test {
     address public owner;
 
     function setUp() public {
+        // Set stable time for deterministic testing
+        _setStableTime();
+
         owner = address(this);
 
         // Mock AAVE provider at expected address
