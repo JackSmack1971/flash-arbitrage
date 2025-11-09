@@ -55,12 +55,15 @@ contract MockLendingPool {
 
         require(success, "executeOperation failed");
 
-        // Check repayment
+        // Check repayment: pool should have received back principal + fee
+        // After sending `amount`, balance was (balances[asset] - amount)
+        // After repayment, balance should be (balances[asset] - amount) + (amount + fee) = balances[asset] + fee
         uint256 totalDebt = amount + fee;
-        require(IERC20(asset).balanceOf(address(this)) >= totalDebt, "repayment failed");
+        uint256 expectedBalance = balances[asset] + fee; // balances[asset] was already decremented
+        require(IERC20(asset).balanceOf(address(this)) >= expectedBalance, "repayment failed");
 
-        // Update pool balance
-        balances[asset] += totalDebt;
+        // Update pool balance to include the fee
+        balances[asset] += fee;
     }
 
     function deposit(address asset, uint256 amount) external {

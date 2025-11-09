@@ -15,6 +15,10 @@ contract MockERC20 is ERC20 {
     }
 
     function mint(address to, uint256 amount) external {
+        // Prevent overflow by capping mint amounts to reasonable values
+        // Max supply: 1e30 (1 trillion tokens with 18 decimals)
+        require(amount <= 1e30, "mint amount too large");
+        require(totalSupply() + amount <= type(uint128).max, "total supply overflow");
         _mint(to, amount);
     }
 }
