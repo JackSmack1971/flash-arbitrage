@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-import "forge-std/Test.sol";
+import "../helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import {
@@ -27,7 +27,7 @@ import {MockRouter} from "../../mocks/MockRouter.sol";
  * 3. Adapter making arbitrary external calls
  * 4. Bytecode hash validation for adapter allowlist
  */
-contract AdapterValidationTest is Test {
+contract AdapterValidationTest is TestBase {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public legitimateAdapter;
     MockERC20 public weth;
@@ -39,6 +39,9 @@ contract AdapterValidationTest is Test {
     address public attacker;
 
     function setUp() public {
+        // Set stable time for deterministic testing
+        _setStableTime();
+
         owner = address(this);
         attacker = makeAddr("attacker");
 

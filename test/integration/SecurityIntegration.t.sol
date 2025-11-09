@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-import "forge-std/Test.sol";
+import "../helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter, IFlashArbLike} from "../../src/UniswapV2Adapter.sol";
@@ -13,7 +13,7 @@ import {MockRouter} from "../../mocks/MockRouter.sol";
  * @notice End-to-end validation of security remediations
  * @dev Tests all fixes work together in realistic scenarios
  */
-contract SecurityIntegrationTest is Test {
+contract SecurityIntegrationTest is TestBase {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public adapter;
     MockERC20 public weth;
@@ -21,6 +21,9 @@ contract SecurityIntegrationTest is Test {
     MockRouter public uniswapRouter;
 
     function setUp() public {
+        // Set stable time for deterministic testing
+        _setStableTime();
+
         // Mock AAVE provider at expected address
         address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
         address mockLendingPool = makeAddr("mockLendingPool");

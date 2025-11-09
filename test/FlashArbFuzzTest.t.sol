@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import {Test} from "forge-std/Test.sol";
+import {TestBase} from "./helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {FlashArbMainnetReady} from "../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter, IFlashArbLike} from "../src/UniswapV2Adapter.sol";
@@ -9,7 +9,7 @@ import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockLendingPool} from "../mocks/MockLendingPool.sol";
 import {MockRouter} from "../mocks/MockRouter.sol";
 
-contract FlashArbFuzzTest is Test {
+contract FlashArbFuzzTest is TestBase {
     FlashArbMainnetReady arb;
     UniswapV2Adapter adapter;
     MockERC20 tokenA;
@@ -21,6 +21,9 @@ contract FlashArbFuzzTest is Test {
     address owner = address(1);
 
     function setUp() public {
+        // Set stable time for deterministic testing
+        _setStableTime();
+
         vm.startPrank(owner);
 
         // Deploy mocks FIRST so we can use their addresses
@@ -234,7 +237,8 @@ contract FlashArbFuzzTest is Test {
     // Fuzz test for deadline timing edge cases
     function testFuzzDeadlineTiming(uint256 deadlineOffset) external {
         // Bound to reasonable deadline window (contract allows max 30 seconds)
-        deadlineOffset = bound(deadlineOffset, 0, 35); // Test both valid (0-30) and invalid (31-35)
+        // Start from 1 (not 0) to ensure deadline > block.timestamp
+        deadlineOffset = bound(deadlineOffset, 1, 35); // Test both valid (1-30) and invalid (31-35)
 
         uint256 loanAmount = 1000 * 10**18;
 

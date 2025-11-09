@@ -24,6 +24,9 @@ contract FlashArbEchidnaTest is Test {
     uint256 private constant MAX_LOAN = 1000000 * 10**18;
 
     constructor() {
+        // Set stable time for deterministic testing
+        vm.warp(1_700_000_000);
+
         // Mock AAVE provider at expected address
         address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
         address mockLendingPoolAddr = makeAddr("mockLendingPool");

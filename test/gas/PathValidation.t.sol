@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-import "forge-std/Test.sol";
+import "../helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
@@ -13,10 +13,13 @@ import {MockERC20} from "../../mocks/MockERC20.sol";
  *
  * Audit Reference: LOW - Gas inefficiencies and DOS via excessive path length
  */
-contract PathValidationTest is Test {
+contract PathValidationTest is TestBase {
     FlashArbMainnetReady public flashArb;
 
     function setUp() public {
+        // Set stable time for deterministic testing
+        _setStableTime();
+
         // Mock AAVE provider at expected address
         address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
         address mockLendingPool = makeAddr("mockLendingPool");
