@@ -110,9 +110,33 @@ contract FlashArbInvariantTest is TestBase {
 
     // Invariant: Only owner can perform privileged operations
     function invariantOnlyOwnerCanExecute() external {
-        vm.prank(user);
+        // Create valid params for the flash loan
+        address[] memory path1 = new address[](2);
+        path1[0] = address(tokenA);
+        path1[1] = address(tokenB);
+
+        address[] memory path2 = new address[](2);
+        path2[0] = address(tokenB);
+        path2[1] = address(tokenA);
+
+        bytes memory params = abi.encode(
+            address(router1),
+            address(router2),
+            path1,
+            path2,
+            90 * 10**17,
+            1000 * 10**18,
+            1 * 10**18,
+            false,
+            owner,
+            _deadlineFromNow(10)
+        );
+
+        // Expect revert, then prank, then call
+        // vm.expectRevert applies to next external call, vm.prank to next call
         vm.expectRevert();
-        arb.startFlashLoan(address(tokenA), 1000 * 10**18, "");
+        vm.prank(user);
+        arb.startFlashLoan(address(tokenA), 1000 * 10**18, params);
     }
 
     // Invariant: Flash loan repayment always succeeds when profitable
