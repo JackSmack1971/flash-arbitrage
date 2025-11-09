@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {FlashArbMainnetReady} from "../src/FlashArbMainnetReady.sol";
-import {UniswapV2Adapter} from "../src/UniswapV2Adapter.sol";
+import {UniswapV2Adapter, IFlashArbLike} from "../src/UniswapV2Adapter.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockLendingPool} from "../mocks/MockLendingPool.sol";
 import {MockRouter} from "../mocks/MockRouter.sol";
@@ -63,7 +63,7 @@ contract FlashArbEchidnaTest is Test {
 
         // Setup adapters
         vm.prank(owner);
-        adapter = new UniswapV2Adapter();
+        adapter = new UniswapV2Adapter(IFlashArbLike(address(arb)));
 
         // Whitelist the mock routers
         vm.prank(owner);

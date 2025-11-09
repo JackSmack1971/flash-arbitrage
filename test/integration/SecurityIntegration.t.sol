@@ -4,7 +4,7 @@ pragma solidity ^0.8.21;
 import "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
-import "../../src/UniswapV2Adapter.sol";
+import {UniswapV2Adapter, IFlashArbLike} from "../../src/UniswapV2Adapter.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockRouter} from "../../mocks/MockRouter.sol";
 
@@ -58,7 +58,7 @@ contract SecurityIntegrationTest is Test {
         bytes memory initCall = abi.encodeCall(FlashArbMainnetReady.initialize, ());
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
         flashArb = FlashArbMainnetReady(payable(address(proxy)));
-        adapter = new UniswapV2Adapter();
+        adapter = new UniswapV2Adapter(IFlashArbLike(address(flashArb)));
 
         // Whitelist the mock router
         flashArb.setRouterWhitelist(address(uniswapRouter), true);
