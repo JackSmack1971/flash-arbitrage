@@ -81,10 +81,21 @@ contract FlashArbInvariantTest is Test {
         // Whitelist owner as trusted initiator
         arb.setTrustedInitiator(owner, true);
 
-        // Seed lending pool with massive liquidity to handle any invariant test scenario
+        // Seed lending pool with massive liquidity
+        // IMPORTANT: Must both deal() tokens AND call deposit() to update internal accounting
         uint256 MASSIVE_LIQUIDITY = 1e30; // 1e12 tokens with 18 decimals
-        deal(address(tokenA), address(lendingPool), MASSIVE_LIQUIDITY);
-        deal(address(tokenB), address(lendingPool), MASSIVE_LIQUIDITY);
+
+        // Give this contract tokens to deposit
+        deal(address(tokenA), address(this), MASSIVE_LIQUIDITY);
+        deal(address(tokenB), address(this), MASSIVE_LIQUIDITY);
+
+        // Approve pool to take tokens
+        tokenA.approve(address(lendingPool), MASSIVE_LIQUIDITY);
+        tokenB.approve(address(lendingPool), MASSIVE_LIQUIDITY);
+
+        // Actually deposit to update pool's internal balances mapping
+        lendingPool.deposit(address(tokenA), MASSIVE_LIQUIDITY);
+        lendingPool.deposit(address(tokenB), MASSIVE_LIQUIDITY);
 
         vm.stopPrank();
     }
