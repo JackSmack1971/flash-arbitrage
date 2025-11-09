@@ -395,16 +395,21 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
             require(tokenWhitelist[path2[i]], "token2-not-whitelisted");
         }
 
-        // Economic optimization: Skip approval if infinite approval already set
-        if (IERC20(_reserve).allowance(address(this), router1) < _amount) {
-            IERC20(_reserve).safeApprove(router1, _amount);
-        }
-
+        // Token approval: If DEX adapter is configured, approve the adapter instead of the router.
+        // The adapter will pull tokens from this contract, then approve and call the router.
+        // This pattern enables dynamic allowance handling for arbitrarily large flash loans.
         uint256 out1;
         if (address(dexAdapters[router1]) != address(0)) {
-            // Security: Validate adapter is still approved before calling
             address adapter1 = address(dexAdapters[router1]);
 
+            // Approve adapter if current allowance is insufficient
+            if (IERC20(_reserve).allowance(address(this), adapter1) < _amount) {
+                // Safe approval pattern: reset to 0 then approve required amount
+                IERC20(_reserve).safeApprove(adapter1, 0);
+                IERC20(_reserve).safeApprove(adapter1, _amount);
+            }
+
+            // Security: Validate adapter is still approved before calling
             // Enhanced security: Verify adapter is a contract
             if (!_isContract(adapter1)) {
                 revert AdapterSecurityViolation(adapter1, "Adapter must be a contract");
@@ -422,6 +427,13 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
             out1 = dexAdapters[router1].swap(router1, _amount, amountOutMin1, path1, address(this), deadline, maxAllowance);
         } else {
+            // No adapter: approve router directly
+            if (IERC20(_reserve).allowance(address(this), router1) < _amount) {
+                // Safe approval pattern: reset to 0 then approve required amount
+                IERC20(_reserve).safeApprove(router1, 0);
+                IERC20(_reserve).safeApprove(router1, _amount);
+            }
+
             uint256[] memory amounts1 = IUniswapV2Router02(router1).swapExactTokensForTokens(_amount, amountOutMin1, path1, address(this), deadline);
             out1 = amounts1[amounts1.length - 1];
         }
@@ -439,16 +451,20 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         uint256 balanceAfterFirstSwap = IERC20(intermediate).balanceOf(address(this));
         require(balanceAfterFirstSwap >= out1, "balance-validation-failed");
 
-        // Economic optimization: Skip approval if infinite approval already set
-        if (IERC20(intermediate).allowance(address(this), router2) < out1) {
-            IERC20(intermediate).safeApprove(router2, out1);
-        }
-
+        // Token approval: If DEX adapter is configured, approve the adapter instead of the router.
+        // The adapter will pull tokens from this contract, then approve and call the router.
         uint256 out2;
         if (address(dexAdapters[router2]) != address(0)) {
-            // Security: Validate adapter is still approved before calling
             address adapter2 = address(dexAdapters[router2]);
 
+            // Approve adapter if current allowance is insufficient
+            if (IERC20(intermediate).allowance(address(this), adapter2) < out1) {
+                // Safe approval pattern: reset to 0 then approve required amount
+                IERC20(intermediate).safeApprove(adapter2, 0);
+                IERC20(intermediate).safeApprove(adapter2, out1);
+            }
+
+            // Security: Validate adapter is still approved before calling
             // Enhanced security: Verify adapter is a contract
             if (!_isContract(adapter2)) {
                 revert AdapterSecurityViolation(adapter2, "Adapter must be a contract");
@@ -466,6 +482,13 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
             out2 = dexAdapters[router2].swap(router2, out1, amountOutMin2, path2, address(this), deadline, maxAllowance);
         } else {
+            // No adapter: approve router directly
+            if (IERC20(intermediate).allowance(address(this), router2) < out1) {
+                // Safe approval pattern: reset to 0 then approve required amount
+                IERC20(intermediate).safeApprove(router2, 0);
+                IERC20(intermediate).safeApprove(router2, out1);
+            }
+
             uint256[] memory amounts2 = IUniswapV2Router02(router2).swapExactTokensForTokens(out1, amountOutMin2, path2, address(this), deadline);
             out2 = amounts2[amounts2.length - 1];
         }

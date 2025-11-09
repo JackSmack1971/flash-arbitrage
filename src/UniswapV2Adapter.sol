@@ -72,10 +72,22 @@ contract UniswapV2Adapter is IDexAdapter {
         // The 'to' should be controlled by FlashArb, not arbitrary addresses
         if (msg.sender != address(flashArb)) revert UnauthorizedCaller();
 
-        // Safe approval pattern: reset to 0 then set to maxAllowance
-        IERC20(path[0]).safeApprove(router, 0);
-        IERC20(path[0]).safeApprove(router, maxAllowance);
+        // CRITICAL: Pull tokens from FlashArbMainnetReady into this adapter first.
+        // The caller (FlashArb) must have approved this adapter for at least amountIn tokens.
+        // This ensures the router can successfully call transferFrom on this adapter.
+        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
 
+        // Dynamic approval: If loan amount exceeds maxAllowance, approve the exact amount.
+        // This handles fuzz test cases with very large flash loans (e.g., 1e29 tokens).
+        // Otherwise, use maxAllowance for gas optimization on subsequent swaps.
+        uint256 approveAmount = amountIn > maxAllowance ? amountIn : maxAllowance;
+
+        // Safe approval pattern: reset to 0 then approve the calculated amount
+        IERC20(path[0]).safeApprove(router, 0);
+        IERC20(path[0]).safeApprove(router, approveAmount);
+
+        // Execute swap via DEX router. Router will call transferFrom on this adapter,
+        // which now holds the amountIn tokens and has granted sufficient allowance.
         uint256[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
             amountIn,
             amountOutMin,
