@@ -1,4 +1,4 @@
-# AGENTS.md: AI Collaboration Guide
+# CLAUDE.md: AI Collaboration Guide
 
 This document provides essential context for AI models interacting with the Flash Arbitrage project. Adhering to these guidelines will ensure consistency, maintain code quality, and optimize security in this DeFi protocol.
 
