@@ -43,11 +43,13 @@ contract MockLendingPool {
         fees[0] = fee;
 
         // Call executeOperation
+        // Pass receiverAddress as initiator to match Aave V2 behavior
+        // (initiator is the contract that called flashLoan)
         bool success = IFlashLoanReceiver(receiverAddress).executeOperation(
             assets,
             amounts,
             fees,
-            address(this), // initiator is lending pool
+            receiverAddress, // initiator is the receiver contract
             params
         );
 
