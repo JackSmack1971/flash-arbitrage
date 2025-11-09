@@ -9,6 +9,7 @@ import {UniswapV2Adapter, IFlashArbLike} from "../src/UniswapV2Adapter.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockLendingPool} from "../mocks/MockLendingPool.sol";
 import {MockRouter} from "../mocks/MockRouter.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract FlashArbFuzzTest is TestBase {
     FlashArbMainnetReady arb;
@@ -110,11 +111,11 @@ contract FlashArbFuzzTest is TestBase {
 
         // Pool already seeded with massive liquidity in setUp
 
-        // Calculate expected profit accounting for flash loan fee
+        // Calculate expected profit accounting for flash loan fee using safe math
         uint256 fee = _flashLoanFee(loanAmount);
         uint256 totalDebt = loanAmount + fee;
-        uint256 amountOut1 = (loanAmount * rate1) / 10**18;
-        uint256 amountOut2 = (amountOut1 * rate2) / 10**18;
+        uint256 amountOut1 = Math.mulDiv(loanAmount, rate1, 10**18);
+        uint256 amountOut2 = Math.mulDiv(amountOut1, rate2, 10**18);
         uint256 expectedProfit = amountOut2 > totalDebt ? amountOut2 - totalDebt : 0;
 
         address[] memory path1 = new address[](2);
@@ -171,9 +172,9 @@ contract FlashArbFuzzTest is TestBase {
             deal(address(tokenB), address(arb), intermediateBalance);
         }
 
-        // Calculate expected outputs
-        uint256 amountOut1 = (loanAmount * rate1) / 10**18;
-        uint256 amountOut2 = (amountOut1 * rate2) / 10**18;
+        // Calculate expected outputs using safe math
+        uint256 amountOut1 = Math.mulDiv(loanAmount, rate1, 10**18);
+        uint256 amountOut2 = Math.mulDiv(amountOut1, rate2, 10**18);
 
         // Use safer slippage calculation
         uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500);
@@ -327,9 +328,9 @@ contract FlashArbFuzzTest is TestBase {
         // Pool already seeded with sufficient liquidity in setUp
         // No need to deal additional tokens
 
-        // Calculate expected outputs
-        uint256 amountOut1 = (loanAmount * rate1) / 10**18;
-        uint256 amountOut2 = (amountOut1 * rate2) / 10**18;
+        // Calculate expected outputs using safe math
+        uint256 amountOut1 = Math.mulDiv(loanAmount, rate1, 10**18);
+        uint256 amountOut2 = Math.mulDiv(amountOut1, rate2, 10**18);
 
         // Calculate total debt including fee
         uint256 fee = _flashLoanFee(loanAmount);
@@ -385,9 +386,9 @@ contract FlashArbFuzzTest is TestBase {
 
         // Pool already seeded in setUp
 
-        // Calculate expected outputs
-        uint256 amountOut1 = (loanAmount * rate1) / 10**18;
-        uint256 amountOut2 = (amountOut1 * rate2) / 10**18;
+        // Calculate expected outputs using safe math
+        uint256 amountOut1 = Math.mulDiv(loanAmount, rate1, 10**18);
+        uint256 amountOut2 = Math.mulDiv(amountOut1, rate2, 10**18);
 
         // Calculate if this will be profitable
         uint256 fee = _flashLoanFee(loanAmount);
@@ -420,15 +421,16 @@ contract FlashArbFuzzTest is TestBase {
 
         vm.prank(owner);
 
-        // Should handle extreme rate differences without reverting unexpectedly
-        if (amountOut2 >= totalDebt) {
-            // Should succeed if can repay
+        // Should handle extreme rate differences
+        // Can revert for multiple reasons: insufficient repayment, slippage exceeded, etc.
+        if (amountOut2 >= totalDebt && amountOut1 >= minOut1 && amountOut2 >= minOut2) {
+            // Should succeed if can repay AND slippage is acceptable
             arb.startFlashLoan(address(tokenA), loanAmount, params);
             // Success - check invariants
             assertEq(tokenA.balanceOf(address(arb)), 0);
             assertEq(tokenB.balanceOf(address(arb)), 0);
         } else {
-            // Should revert if cannot repay
+            // Should revert if cannot repay or slippage too high
             vm.expectRevert();
             arb.startFlashLoan(address(tokenA), loanAmount, params);
         }

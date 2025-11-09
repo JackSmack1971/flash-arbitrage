@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract MockRouter {
     using SafeERC20 for IERC20;
@@ -18,6 +19,7 @@ contract MockRouter {
     }
 
     function setExchangeRate(uint256 _exchangeRate) external {
+        require(_exchangeRate >= 1e14 && _exchangeRate <= 1e22, "rate out of bounds");
         exchangeRate = _exchangeRate;
     }
 
@@ -36,8 +38,8 @@ contract MockRouter {
         // Transfer input tokens from sender
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        // Calculate output amount
-        uint256 amountOut = (amountIn * exchangeRate) / 10**18;
+        // Calculate output amount using Math.mulDiv to prevent overflow
+        uint256 amountOut = Math.mulDiv(amountIn, exchangeRate, 10**18);
         require(amountOut >= amountOutMin, "insufficient output");
 
         // Mint output tokens (in a real DEX, these would come from liquidity)
