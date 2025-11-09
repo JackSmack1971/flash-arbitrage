@@ -31,69 +31,66 @@ contract FlashArbInvariantTest is Test {
         router1 = new MockRouter(address(tokenA), address(tokenB));
         router2 = new MockRouter(address(tokenB), address(tokenA));
 
-        // Mock AAVE provider at expected address - use ACTUAL lending pool address
+        // STEP 1: FUND ALL ACTORS BEFORE ANY OPERATIONS
+        uint256 MASSIVE_LIQUIDITY = 1e30; // 1e12 tokens with 18 decimals
+
+        deal(address(tokenA), address(this), MASSIVE_LIQUIDITY);
+        deal(address(tokenB), address(this), MASSIVE_LIQUIDITY);
+        deal(address(tokenA), owner, MASSIVE_LIQUIDITY);
+        deal(address(tokenB), owner, MASSIVE_LIQUIDITY);
+        deal(address(tokenA), user, MASSIVE_LIQUIDITY);
+        deal(address(tokenB), user, MASSIVE_LIQUIDITY);
+        vm.deal(address(this), 100 ether);
+        vm.deal(owner, 100 ether);
+        vm.deal(user, 100 ether);
+
+        // STEP 2: Mock AAVE provider and mainnet addresses
         address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
         vm.etch(aaveProvider, hex"00");
         vm.mockCall(
             aaveProvider,
             abi.encodeWithSignature("getLendingPool()"),
-            abi.encode(address(lendingPool))  // Use actual MockLendingPool address
+            abi.encode(address(lendingPool))
         );
 
-        // Mock hardcoded mainnet addresses that initialize() tries to call
-        // Deploy mock ERC20s and etch their bytecode at the hardcoded addresses
+        // Mock hardcoded mainnet addresses
         MockERC20 mockWETH = new MockERC20("WETH", "WETH", 18);
         MockERC20 mockDAI = new MockERC20("DAI", "DAI", 18);
         MockERC20 mockUSDC = new MockERC20("USDC", "USDC", 6);
         vm.etch(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, address(mockWETH).code);
         vm.etch(0x6B175474E89094C44Da98b954EedeAC495271d0F, address(mockDAI).code);
         vm.etch(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, address(mockUSDC).code);
-        vm.etch(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, address(mockWETH).code); // Routers
+        vm.etch(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, address(mockWETH).code);
         vm.etch(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F, address(mockWETH).code);
 
-        // Deploy implementation
+        // STEP 3: Deploy and initialize proxy
         FlashArbMainnetReady implementation = new FlashArbMainnetReady();
-
-        // Deploy proxy with initialization
         bytes memory initCall = abi.encodeCall(FlashArbMainnetReady.initialize, ());
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initCall);
         arb = FlashArbMainnetReady(payable(address(proxy)));
 
-        // Setup adapters
+        // STEP 4: Setup adapters
         adapter = new UniswapV2Adapter(IFlashArbLike(address(arb)));
 
-        // Whitelist the mock routers
+        // STEP 5: Whitelist routers and tokens
         arb.setRouterWhitelist(address(router1), true);
         arb.setRouterWhitelist(address(router2), true);
-
-        // Approve adapter and its bytecode hash
-        bytes32 adapterHash = address(adapter).codehash;
-        arb.approveAdapterCodeHash(adapterHash, true);
-        arb.approveAdapter(address(adapter), true);
-
-        arb.setDexAdapter(address(router1), address(adapter));
-        arb.setDexAdapter(address(router2), address(adapter));
-
-        // Whitelist tokens so tests can proceed past asset validation
         arb.setTokenWhitelist(address(tokenA), true);
         arb.setTokenWhitelist(address(tokenB), true);
 
-        // Whitelist owner as trusted initiator
+        // STEP 6: Approve and configure adapters
+        bytes32 adapterHash = address(adapter).codehash;
+        arb.approveAdapterCodeHash(adapterHash, true);
+        arb.approveAdapter(address(adapter), true);
+        arb.setDexAdapter(address(router1), address(adapter));
+        arb.setDexAdapter(address(router2), address(adapter));
+
+        // STEP 7: Set trusted initiator
         arb.setTrustedInitiator(owner, true);
 
-        // Seed lending pool with massive liquidity
-        // IMPORTANT: Must both deal() tokens AND call deposit() to update internal accounting
-        uint256 MASSIVE_LIQUIDITY = 1e30; // 1e12 tokens with 18 decimals
-
-        // Give this contract tokens to deposit
-        deal(address(tokenA), address(this), MASSIVE_LIQUIDITY);
-        deal(address(tokenB), address(this), MASSIVE_LIQUIDITY);
-
-        // Approve pool to take tokens
-        tokenA.approve(address(lendingPool), MASSIVE_LIQUIDITY);
-        tokenB.approve(address(lendingPool), MASSIVE_LIQUIDITY);
-
-        // Actually deposit to update pool's internal balances mapping
+        // STEP 8: Configure pool liquidity
+        tokenA.approve(address(lendingPool), type(uint256).max);
+        tokenB.approve(address(lendingPool), type(uint256).max);
         lendingPool.deposit(address(tokenA), MASSIVE_LIQUIDITY);
         lendingPool.deposit(address(tokenB), MASSIVE_LIQUIDITY);
 
