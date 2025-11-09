@@ -365,6 +365,11 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
         // Architectural: Invariant checks
         require(routerWhitelist[router1] && routerWhitelist[router2], "router-not-allowed");
+
+        // Security: Validate routers are contracts (prevent EOA routers)
+        require(_isContract(router1), "router1-must-be-contract");
+        require(_isContract(router2), "router2-must-be-contract");
+
         require(path1.length >= 2 && path2.length >= 2, "invalid-paths");
 
         // Security: Validate path lengths before expensive whitelist iteration (gas DOS prevention)
@@ -487,11 +492,15 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         }
 
         if (profit > 0) {
-            // If unwrap requested and profit token is WETH, unwrap to ETH and track ethProfits
+            // If unwrap requested and profit token is WETH, unwrap to ETH and transfer to owner
             if (unwrapProfitToEth && _reserve == WETH) {
                 IWETH(WETH).withdraw(profit);
+                (bool sent, ) = owner().call{value: profit}("");
+                require(sent, "eth-transfer-failed");
                 ethProfits += profit;
             } else {
+                // Transfer profit to owner immediately to maintain zero balance invariant
+                IERC20(_reserve).safeTransfer(owner(), profit);
                 profits[_reserve] += profit;
             }
         }
@@ -500,6 +509,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         if (IERC20(_reserve).allowance(address(this), lendingPool) < totalDebt) {
             IERC20(_reserve).safeApprove(lendingPool, totalDebt);
         }
+
+        // Security: Sweep any remaining dust to maintain zero balance invariant
+        address[] memory dustTokens = new address[](2);
+        dustTokens[0] = _reserve;
+        dustTokens[1] = intermediate;
+        _sweepDust(dustTokens);
 
         emit FlashLoanExecuted(opInitiator, _reserve, _amount, _fee, profit);
         return true;
@@ -553,6 +568,22 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         // Division by 10000 converts back from BPS to actual amount
         // Example: 100 * (10000 - 200) / 10000 = 100 * 9800 / 10000 = 98
         return (_inputAmount * (10000 - _maxSlippageBps)) / 10000;
+    }
+
+    /**
+     * @notice Internal helper to sweep token dust to owner
+     * @dev Ensures contract maintains zero balance invariant after operations
+     * @dev Sweeps all remaining balance since profits are transferred immediately
+     * @param tokens Array of token addresses to sweep
+     */
+    function _sweepDust(address[] memory tokens) internal {
+        address recipient = owner();
+        for (uint256 i = 0; i < tokens.length; i++) {
+            uint256 balance = IERC20(tokens[i]).balanceOf(address(this));
+            if (balance > 0) {
+                IERC20(tokens[i]).safeTransfer(recipient, balance);
+            }
+        }
     }
 
     /**

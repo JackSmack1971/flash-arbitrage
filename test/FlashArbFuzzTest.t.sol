@@ -203,10 +203,12 @@ contract FlashArbFuzzTest is Test {
             path2[i] = i % 2 == 0 ? address(tokenB) : address(tokenA);
         }
 
-        // Ensure path1 starts with loan token
+        // Ensure path1 starts with loan token (reserve)
         path1[0] = address(tokenA);
-        // Ensure path2 starts with intermediate token
+        // Ensure path2 starts with intermediate token (path1's end)
         path2[0] = address(tokenB);
+        // CRITICAL: Ensure path2 ends with reserve token (path validation requirement)
+        path2[path2.length - 1] = address(tokenA);
 
         bytes memory params = abi.encode(
             address(router1),
