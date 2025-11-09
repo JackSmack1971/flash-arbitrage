@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import {Test} from "forge-std/Test.sol";
+import {FuzzBounds} from "./FuzzBounds.sol";
 
 /**
  * @title TestBase
@@ -9,6 +10,67 @@ import {Test} from "forge-std/Test.sol";
  * @dev Provides deadline helpers and time management for consistent test behavior
  */
 abstract contract TestBase is Test {
+    // ============ Math Helpers ============
+
+    /**
+     * @notice Calculate flash loan fee with ceiling division
+     * @dev Uses ceiling division to avoid rounding down: (amount * fee + divisor - 1) / divisor
+     * @param amount The loan amount
+     * @return fee The flash loan fee (rounded up)
+     */
+    function _flashLoanFee(uint256 amount) internal pure returns (uint256) {
+        return (amount * FuzzBounds.FLASH_LOAN_FEE_BPS + FuzzBounds.MAX_BPS - 1) / FuzzBounds.MAX_BPS;
+    }
+
+    /**
+     * @notice Calculate minimum output after slippage
+     * @dev Applies slippage tolerance: quote * (10000 - slippageBps) / 10000
+     * @param quote The quoted output amount
+     * @param slippageBps Slippage in basis points
+     * @return minOut Minimum acceptable output after slippage
+     */
+    function _minOutAfterSlippage(uint256 quote, uint256 slippageBps) internal pure returns (uint256) {
+        require(slippageBps <= FuzzBounds.MAX_SLIPPAGE_BPS, "Slippage too high");
+        return quote * (FuzzBounds.MAX_BPS - slippageBps) / FuzzBounds.MAX_BPS;
+    }
+
+    /**
+     * @notice Bound trade amount to safe range
+     * @param amount Fuzzed amount
+     * @return Bounded amount within [MIN_TRADE, MAX_TRADE]
+     */
+    function _boundTrade(uint256 amount) internal pure returns (uint256) {
+        return bound(amount, FuzzBounds.MIN_TRADE, FuzzBounds.MAX_TRADE);
+    }
+
+    /**
+     * @notice Bound flash loan amount to safe range with fee headroom
+     * @param amount Fuzzed amount
+     * @return Bounded amount within [MIN_TRADE, MAX_FLASH_LOAN]
+     */
+    function _boundFlashLoan(uint256 amount) internal pure returns (uint256) {
+        return bound(amount, FuzzBounds.MIN_TRADE, FuzzBounds.MAX_FLASH_LOAN);
+    }
+
+    /**
+     * @notice Bound slippage to reasonable range
+     * @param bps Fuzzed slippage in basis points
+     * @return Bounded slippage within [0, MAX_SLIPPAGE_BPS]
+     */
+    function _boundSlippage(uint256 bps) internal pure returns (uint256) {
+        return bound(bps, 0, FuzzBounds.MAX_SLIPPAGE_BPS);
+    }
+
+    /**
+     * @notice Bound exchange rate to realistic range
+     * @param rate Fuzzed exchange rate
+     * @return Bounded rate within [MIN_EXCHANGE_RATE, MAX_EXCHANGE_RATE]
+     */
+    function _boundExchangeRate(uint256 rate) internal pure returns (uint256) {
+        return bound(rate, FuzzBounds.MIN_EXCHANGE_RATE, FuzzBounds.MAX_EXCHANGE_RATE);
+    }
+
+    // ============ Deadline Helpers ============
     /**
      * @notice Generate a valid future deadline from a fuzzed input
      * @dev Bounds deadline to [block.timestamp + 1, type(uint256).max - 1 hours]

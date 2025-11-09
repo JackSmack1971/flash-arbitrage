@@ -98,11 +98,10 @@ contract FlashArbFuzzTest is TestBase {
 
     // Fuzz test for profit calculation edge cases
     function testFuzzProfitCalculation(uint256 loanAmount, uint256 rate1, uint256 rate2) external {
-        // Bound inputs to reasonable ranges that pool can support
-        // Pool has 1e30, so cap at 1e29 to leave headroom for fees
-        loanAmount = bound(loanAmount, 1 * 10**18, 1e29); // 1 to 1e11 tokens (reasonable for flash loans)
-        rate1 = bound(rate1, 1 * 10**17, 10 * 10**18); // 0.1 to 10 ratio
-        rate2 = bound(rate2, 1 * 10**17, 10 * 10**18); // 0.1 to 10 ratio
+        // Bound inputs using centralized bounds
+        loanAmount = _boundFlashLoan(loanAmount);
+        rate1 = _boundExchangeRate(rate1);
+        rate2 = _boundExchangeRate(rate2);
 
         // Setup exchange rates
         router1.setExchangeRate(rate1);
@@ -110,10 +109,12 @@ contract FlashArbFuzzTest is TestBase {
 
         // Pool already seeded with massive liquidity in setUp
 
-        // Calculate expected profit
+        // Calculate expected profit accounting for flash loan fee
+        uint256 fee = _flashLoanFee(loanAmount);
+        uint256 totalDebt = loanAmount + fee;
         uint256 amountOut1 = (loanAmount * rate1) / 10**18;
         uint256 amountOut2 = (amountOut1 * rate2) / 10**18;
-        uint256 expectedProfit = amountOut2 > loanAmount ? amountOut2 - loanAmount : 0;
+        uint256 expectedProfit = amountOut2 > totalDebt ? amountOut2 - totalDebt : 0;
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
@@ -123,13 +124,17 @@ contract FlashArbFuzzTest is TestBase {
         path2[0] = address(tokenB);
         path2[1] = address(tokenA);
 
+        // Use safer slippage calculation (5% slippage)
+        uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500);
+        uint256 minOut2 = _minOutAfterSlippage(amountOut2, 500);
+
         bytes memory params = abi.encode(
             address(router1),
             address(router2),
             path1,
             path2,
-            (amountOut1 * 95) / 100, // 95% of expected output
-            (amountOut2 * 95) / 100, // 95% of expected output
+            minOut1,
+            minOut2,
             0, // minProfit = 0 to test edge cases
             false,
             owner,
@@ -150,16 +155,28 @@ contract FlashArbFuzzTest is TestBase {
 
     // Fuzz test for balance validation scenarios
     function testFuzzBalanceValidation(uint256 loanAmount, uint256 intermediateBalance) external {
-        // Bound to amounts pool can support
-        loanAmount = bound(loanAmount, 1 * 10**18, 1e28); // Cap well below pool's 1e30
-        intermediateBalance = bound(intermediateBalance, 0, loanAmount * 2);
+        // Bound to amounts pool can support using helper
+        loanAmount = _boundFlashLoan(loanAmount);
+        intermediateBalance = bound(intermediateBalance, 0, _boundTrade(loanAmount * 2));
 
         // Setup profitable arbitrage
-        router1.setExchangeRate(95 * 10**17);
-        router2.setExchangeRate(105 * 10**17);
+        uint256 rate1 = 95 * 10**17;
+        uint256 rate2 = 105 * 10**17;
+        router1.setExchangeRate(rate1);
+        router2.setExchangeRate(rate2);
 
         // Pool already seeded; optionally add intermediate balance to arb contract
-        deal(address(tokenB), address(arb), intermediateBalance);
+        if (intermediateBalance > 0) {
+            deal(address(tokenB), address(arb), intermediateBalance);
+        }
+
+        // Calculate expected outputs
+        uint256 amountOut1 = (loanAmount * rate1) / 10**18;
+        uint256 amountOut2 = (amountOut1 * rate2) / 10**18;
+
+        // Use safer slippage calculation
+        uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500);
+        uint256 minOut2 = _minOutAfterSlippage(amountOut2, 500);
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
@@ -174,26 +191,37 @@ contract FlashArbFuzzTest is TestBase {
             address(router2),
             path1,
             path2,
-            90 * 10**17,
-            1000 * 10**18,
+            minOut1,
+            minOut2,
             1 * 10**18,
             false,
             owner,
             _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
         );
 
-        vm.prank(owner);
-        arb.startFlashLoan(address(tokenA), loanAmount, params);
+        // Calculate if this will be profitable
+        uint256 fee = _flashLoanFee(loanAmount);
+        uint256 totalDebt = loanAmount + fee;
+        bool shouldBeRrofitable = amountOut2 >= totalDebt + 1 * 10**18;
 
-        // Contract should not hold tokens after operation
-        assertEq(tokenA.balanceOf(address(arb)), 0);
-        assertEq(tokenB.balanceOf(address(arb)), 0);
+        vm.prank(owner);
+        if (shouldBeRrofitable) {
+            arb.startFlashLoan(address(tokenA), loanAmount, params);
+            // Contract should not hold tokens after operation
+            assertEq(tokenA.balanceOf(address(arb)), 0);
+            assertEq(tokenB.balanceOf(address(arb)), 0);
+        } else {
+            // Should revert if not profitable enough
+            vm.expectRevert();
+            arb.startFlashLoan(address(tokenA), loanAmount, params);
+        }
     }
 
     // Fuzz test for path validation with malformed inputs
     function testFuzzPathValidation(uint256 pathLength1, uint256 pathLength2) external {
-        pathLength1 = bound(pathLength1, 2, 5);
-        pathLength2 = bound(pathLength2, 2, 5);
+        // Bound path lengths to reasonable range
+        pathLength1 = bound(pathLength1, FuzzBounds.MIN_PATH_LENGTH, FuzzBounds.MAX_PATH_LENGTH);
+        pathLength2 = bound(pathLength2, FuzzBounds.MIN_PATH_LENGTH, FuzzBounds.MAX_PATH_LENGTH);
 
         address[] memory path1 = new address[](pathLength1);
         address[] memory path2 = new address[](pathLength2);
@@ -213,6 +241,8 @@ contract FlashArbFuzzTest is TestBase {
         // CRITICAL: Ensure path2 ends with reserve token (path validation requirement)
         path2[path2.length - 1] = address(tokenA);
 
+        uint256 loanAmount = 1000 * 10**18;
+
         bytes memory params = abi.encode(
             address(router1),
             address(router2),
@@ -231,7 +261,7 @@ contract FlashArbFuzzTest is TestBase {
         if (path1[path1.length - 1] != path2[0]) {
             vm.expectRevert();
         }
-        arb.startFlashLoan(address(tokenA), 1000 * 10**18, params);
+        arb.startFlashLoan(address(tokenA), loanAmount, params);
     }
 
     // Fuzz test for deadline timing edge cases
@@ -283,16 +313,30 @@ contract FlashArbFuzzTest is TestBase {
 
     // Fuzz test for boundary values in loan amounts
     function testFuzzLoanAmountBoundaries(uint256 loanAmount) external {
-        // Cap to pool's available liquidity (1e30 minus small buffer for fees)
-        uint256 maxAvailable = 9e29; // 90% of pool to leave headroom
-        loanAmount = bound(loanAmount, 1, maxAvailable);
+        // Use bounded flash loan amount
+        loanAmount = _boundFlashLoan(loanAmount);
 
-        // Setup rates
-        router1.setExchangeRate(1 * 10**18);
-        router2.setExchangeRate(1 * 10**18);
+        // Setup rates to ensure profitability (need >100% to cover flash loan fee)
+        // With 0.09% fee, we need slightly more than 1:1
+        uint256 rate1 = 100 * 10**16; // 1.00 (1:1)
+        uint256 rate2 = 101 * 10**16; // 1.01 (1% profit to cover fee)
+        router1.setExchangeRate(rate1);
+        router2.setExchangeRate(rate2);
 
         // Pool already seeded with sufficient liquidity in setUp
         // No need to deal additional tokens
+
+        // Calculate expected outputs
+        uint256 amountOut1 = (loanAmount * rate1) / 10**18;
+        uint256 amountOut2 = (amountOut1 * rate2) / 10**18;
+
+        // Calculate total debt including fee
+        uint256 fee = _flashLoanFee(loanAmount);
+        uint256 totalDebt = loanAmount + fee;
+
+        // Use conservative slippage
+        uint256 minOut1 = _minOutAfterSlippage(amountOut1, 100); // 1% slippage
+        uint256 minOut2 = _minOutAfterSlippage(amountOut2, 100); // 1% slippage
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
@@ -307,25 +351,31 @@ contract FlashArbFuzzTest is TestBase {
             address(router2),
             path1,
             path2,
-            loanAmount / 2, // Conservative minimum
-            loanAmount,
-            0,
+            minOut1,
+            minOut2,
+            0, // No minimum profit requirement
             false,
             owner,
             _deadlineFromNow(10) // 10 seconds (within MAX_DEADLINE)
         );
 
-        // Should not revert due to overflow/underflow in calculations
-        // With bounded loan amounts, should always succeed
+        // Should succeed - we have profitable rates and bounded amounts
         vm.prank(owner);
-        arb.startFlashLoan(address(tokenA), loanAmount, params);
+        // Ensure we have enough to repay
+        if (amountOut2 >= totalDebt) {
+            arb.startFlashLoan(address(tokenA), loanAmount, params);
+        } else {
+            // Should revert if cannot repay
+            vm.expectRevert();
+            arb.startFlashLoan(address(tokenA), loanAmount, params);
+        }
     }
 
     // Fuzz test for exchange rate edge cases
     function testFuzzExchangeRateEdgeCases(uint256 rate1, uint256 rate2) external {
-        // Bound to reasonable exchange rates (0.01x to 100x)
-        rate1 = bound(rate1, 1 * 10**16, 100 * 10**18); // 0.01 to 100
-        rate2 = bound(rate2, 1 * 10**16, 100 * 10**18); // 0.01 to 100
+        // Bound to reasonable exchange rates using helper
+        rate1 = _boundExchangeRate(rate1);
+        rate2 = _boundExchangeRate(rate2);
 
         uint256 loanAmount = 1000 * 10**18;
 
@@ -334,6 +384,18 @@ contract FlashArbFuzzTest is TestBase {
 
         // Pool already seeded in setUp
 
+        // Calculate expected outputs
+        uint256 amountOut1 = (loanAmount * rate1) / 10**18;
+        uint256 amountOut2 = (amountOut1 * rate2) / 10**18;
+
+        // Calculate if this will be profitable
+        uint256 fee = _flashLoanFee(loanAmount);
+        uint256 totalDebt = loanAmount + fee;
+
+        // Use very permissive slippage for edge case testing
+        uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500); // 5% slippage
+        uint256 minOut2 = _minOutAfterSlippage(amountOut2, 500); // 5% slippage
+
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
         path1[1] = address(tokenB);
@@ -347,8 +409,8 @@ contract FlashArbFuzzTest is TestBase {
             address(router2),
             path1,
             path2,
-            1, // Very low minimum
-            1,
+            minOut1,
+            minOut2,
             0,
             false,
             owner,
@@ -358,13 +420,16 @@ contract FlashArbFuzzTest is TestBase {
         vm.prank(owner);
 
         // Should handle extreme rate differences without reverting unexpectedly
-        try arb.startFlashLoan(address(tokenA), loanAmount, params) {
+        if (amountOut2 >= totalDebt) {
+            // Should succeed if can repay
+            arb.startFlashLoan(address(tokenA), loanAmount, params);
             // Success - check invariants
             assertEq(tokenA.balanceOf(address(arb)), 0);
             assertEq(tokenB.balanceOf(address(arb)), 0);
-        } catch {
-            // Expected reverts for insufficient repayment or other validation failures
-            // Error may not have data through flash loan callback
+        } else {
+            // Should revert if cannot repay
+            vm.expectRevert();
+            arb.startFlashLoan(address(tokenA), loanAmount, params);
         }
     }
 
