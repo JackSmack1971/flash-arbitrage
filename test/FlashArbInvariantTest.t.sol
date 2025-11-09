@@ -143,7 +143,7 @@ contract FlashArbInvariantTest is TestBase {
             1 * 10**18,
             false,
             owner,
-            block.timestamp + 3600
+            _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
         );
 
         vm.prank(owner);
@@ -174,7 +174,7 @@ contract FlashArbInvariantTest is TestBase {
             1 * 10**18,
             false,
             owner,
-            block.timestamp + 10
+            _deadlineFromNow(10) // 10 seconds (within MAX_DEADLINE)
         );
 
         vm.prank(owner);
@@ -253,7 +253,7 @@ contract FlashArbInvariantTest is TestBase {
             1 * 10**18,
             false,
             address(0x999), // Untrusted
-            block.timestamp + 10
+            _deadlineFromNow(10) // 10 seconds (within MAX_DEADLINE)
         );
 
         vm.prank(owner);
@@ -289,7 +289,7 @@ contract FlashArbInvariantTest is TestBase {
             1 * 10**18,
             false,
             owner,
-            block.timestamp + 3600
+            _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
         );
 
         vm.prank(owner);

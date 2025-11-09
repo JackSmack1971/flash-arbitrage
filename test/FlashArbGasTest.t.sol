@@ -128,7 +128,7 @@ contract FlashArbGasTest is TestBase {
             1 * 10**18,
             false,
             owner,
-            block.timestamp + 3600
+            _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
         );
 
         vm.prank(owner);
@@ -181,7 +181,7 @@ contract FlashArbGasTest is TestBase {
             1 * 10**18,
             false,
             owner,
-            block.timestamp + 3600
+            _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
         );
 
         vm.prank(owner);
@@ -225,7 +225,7 @@ contract FlashArbGasTest is TestBase {
             1 * 10**18,
             false,
             owner,
-            block.timestamp + 3600
+            _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
         );
 
         vm.prank(owner);
