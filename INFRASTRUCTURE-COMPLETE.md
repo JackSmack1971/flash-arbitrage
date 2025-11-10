@@ -359,7 +359,7 @@ SIMULATION_ENABLED=true
 
 After completing the infrastructure implementation, several Solidity compilation errors and test failures were identified and resolved:
 
-### Compilation Error Fixes (6 commits)
+### Compilation Error Fixes (7 commits)
 
 1. **Duplicate Error Declarations** (commit `ad19378`)
    - **Issue**: `RouterNotWhitelisted` and `UnauthorizedCaller` imported from multiple sources
@@ -398,14 +398,20 @@ After completing the infrastructure implementation, several Solidity compilation
    - **Issue**: "Address: low-level delegate call failed" during proxy initialization
    - **Files**: `test/unit/FlashArbV3.t.sol`, `test/integration/FlashArbV3Fork.t.sol`
    - **Root Cause**: `initialize()` calls mainnet Aave provider which has no code in test environment
-   - **Fix**: Mock Aave provider and hardcoded mainnet addresses using `vm.etch` and `vm.mockCall`
+   - **Fix (Attempt 1)**: Mock Aave provider with `hex"00"` bytecode
+   - **Issue (Follow-up)**: Using `hex"00"` for token addresses caused delegatecall failures
+
+7. **V3 Test MockERC20 Bytecode** (commit `c994fb0`)
+   - **Issue**: "Address: low-level delegate call failed" persisted after initial mocking
+   - **Files**: `test/unit/FlashArbV3.t.sol`, `test/integration/FlashArbV3Fork.t.sol`
+   - **Root Cause**: Using `hex"00"` instead of actual contract bytecode for token addresses
+   - **Fix**: Deploy MockERC20 contracts and use their bytecode with `vm.etch`
    - **Code Pattern**:
      ```solidity
-     address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
-     address mockLendingPool = makeAddr("mockLendingPool");
-     vm.etch(aaveProvider, hex"00");
-     vm.mockCall(aaveProvider, abi.encodeWithSignature("getLendingPool()"), abi.encode(mockLendingPool));
-     // Also mock WETH, DAI, USDC, and router addresses
+     MockERC20 mockWETH = new MockERC20("WETH", "WETH", 18);
+     MockERC20 mockDAI = new MockERC20("DAI", "DAI", 18);
+     vm.etch(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, address(mockWETH).code);
+     vm.etch(0x6B175474E89094C44Da98b954EedeAC495271d0F, address(mockDAI).code);
      ```
 
 ### Test Status
@@ -434,9 +440,10 @@ After fixes, test compilation succeeded. The following tests were passing:
 - [x] No security vulnerabilities introduced
 - [x] Graceful shutdown implemented
 - [x] Emergency safeguards in place
-- [x] Solidity compilation errors resolved (6 fixes)
+- [x] Solidity compilation errors resolved (7 fixes)
 - [x] UUPS proxy pattern correctly implemented in tests
 - [x] Aave provider mocking added for test environments
+- [x] MockERC20 bytecode properly deployed for test mocking
 - [x] All changes committed and pushed
 
 ---
@@ -448,5 +455,5 @@ After fixes, test compilation succeeded. The following tests were passing:
 **Date**: 2025-11-10
 **Branch**: claude/implement-infrastructure-011CUyGuxCU7xuS9J9A1eBQr
 
-**Total Commits**: 8 (1 infrastructure + 6 fixes + 1 docs)
-**Final Commit**: `852c8b5` - V3 test Aave provider mocking
+**Total Commits**: 10 (1 infrastructure + 7 fixes + 2 docs)
+**Final Commit**: `c994fb0` - V3 test MockERC20 bytecode fix
