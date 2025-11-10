@@ -7,6 +7,7 @@ import "../../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter, IFlashArbLike} from "../../src/UniswapV2Adapter.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockRouter} from "../../mocks/MockRouter.sol";
+import "../../src/errors/FlashArbErrors.sol";
 
 /**
  * @title SecurityIntegration Test Suite
@@ -138,10 +139,10 @@ contract SecurityIntegrationTest is TestBase {
         assertEq(flashArb.maxPathLength(), 7);
 
         // Bounds validation
-        vm.expectRevert("Path length too short");
+        vm.expectRevert(abi.encodeWithSelector(InvalidPathLength.selector, 1));
         flashArb.setMaxPathLength(1);
 
-        vm.expectRevert("Path length too long");
+        vm.expectRevert(abi.encodeWithSelector(PathTooLong.selector, 11, 10));
         flashArb.setMaxPathLength(11);
     }
 
