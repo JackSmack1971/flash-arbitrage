@@ -122,6 +122,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
     uint256 public constant MAX_DEADLINE = 30; // MEV protection: max 30 seconds deadline
     uint256 public maxAllowance; // Configurable max token approval (default: 1 billion tokens with 18 decimals)
     uint8 public maxPathLength; // Maximum swap path length (default: 5 allows direct + 2-hop paths)
+    uint256 public maxFlashLoanAmount; // SEC-201: Maximum flash loan amount cap (default: 9e29 = 900 billion tokens with 18 decimals)
 
     event FlashLoanRequested(address indexed initiator, address asset, uint256 amount);
     event FlashLoanExecuted(address indexed initiator, address asset, uint256 amount, uint256 fee, uint256 profit);
@@ -136,6 +137,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
     event MaxAllowanceUpdated(uint256 newMaxAllowance);
     event MaxPathLengthUpdated(uint8 newMaxPathLength);
     event MaxSlippageUpdated(uint256 newMaxSlippageBps);
+    event MaxFlashLoanAmountUpdated(uint256 newMaxFlashLoanAmount); // SEC-201: Flash loan cap event
     event EmergencyWithdrawn(address indexed token, address indexed to, uint256 amount);
     event AaveVersionUpdated(bool useV3, address pool); // AT-018: V3 migration event
 
@@ -154,6 +156,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         maxSlippageBps = 200; // 2% maximum slippage
         maxAllowance = 1e27; // 1 billion tokens with 18 decimals
         maxPathLength = 5; // Maximum swap path length
+        maxFlashLoanAmount = 9e29; // SEC-201: 900 billion tokens with 18 decimals (90% of typical pool liquidity)
 
         provider = ILendingPoolAddressesProvider(AAVE_PROVIDER);
         lendingPool = provider.getLendingPool();
@@ -260,6 +263,17 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
     }
 
     /**
+     * @notice Set maximum flash loan amount cap
+     * @dev SEC-201: Prevents unrealistic flash loan amounts that could cause overflow or DOS
+     * @param _maxFlashLoanAmount New maximum flash loan amount (must be >= 1e18 to support basic operations)
+     */
+    function setMaxFlashLoanAmount(uint256 _maxFlashLoanAmount) external onlyOwner {
+        if (_maxFlashLoanAmount < 1e18) revert ZeroAmount(); // Must support at least 1 token
+        maxFlashLoanAmount = _maxFlashLoanAmount;
+        emit MaxFlashLoanAmountUpdated(_maxFlashLoanAmount);
+    }
+
+    /**
      * @notice Approve or revoke adapter address and code hash
      * @dev Two-step validation: both address and bytecode hash must be approved
      */
@@ -359,12 +373,17 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
     /**
      * @notice Start a single-asset flash loan via Aave V2 or V3 (based on useAaveV3 flag)
      * @dev AT-018: Branching logic for V2/V3 flash loan initiation
+     * @dev SEC-201: Enforces maximum flash loan amount cap to prevent unrealistic scenarios
      * @param asset The ERC20 token address to borrow
      * @param amount The amount to borrow
      * @param params ABI-encoded arbitrage parameters
      */
     function startFlashLoan(address asset, uint256 amount, bytes calldata params) external onlyOwner whenNotPaused {
         if (amount == 0) revert ZeroAmount();
+        // SEC-201: Enforce maximum flash loan amount cap
+        if (amount > maxFlashLoanAmount) {
+            revert InsufficientProfit(amount, maxFlashLoanAmount); // Reuse existing error (amount > allowed max)
+        }
         if (!tokenWhitelist[asset]) revert TokenNotWhitelisted(asset);
 
         address[] memory assets = new address[](1);
@@ -517,9 +536,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             out1 = amounts1[amounts1.length - 1];
         }
 
-        // Note: Slippage protection is enforced by the router via amountOutMin1 parameter.
-        // The user-specified amountOutMin1 already incorporates their slippage tolerance.
-        // No additional on-chain check needed as it would create redundant validation.
+        // SEC-202: Explicit slippage validation using on-chain maxSlippageBps
+        // Calculate minimum acceptable output based on input amount and slippage tolerance
+        uint256 minAcceptableOut1 = _calculateMinOutput(_amount, maxSlippageBps);
+        if (out1 < minAcceptableOut1) {
+            revert SlippageExceeded(minAcceptableOut1, out1, maxSlippageBps);
+        }
 
         address intermediate = path1[path1.length - 1];
         if (path2[0] != intermediate) revert InvalidPathLength(0);
@@ -572,9 +594,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             out2 = amounts2[amounts2.length - 1];
         }
 
-        // Note: Slippage protection is enforced by the router via amountOutMin2 parameter.
-        // The user-specified amountOutMin2 already incorporates their slippage tolerance.
-        // No additional on-chain check needed as it would create redundant validation.
+        // SEC-202: Explicit slippage validation for second swap using on-chain maxSlippageBps
+        // Calculate minimum acceptable output based on intermediate amount and slippage tolerance
+        uint256 minAcceptableOut2 = _calculateMinOutput(out1, maxSlippageBps);
+        if (out2 < minAcceptableOut2) {
+            revert SlippageExceeded(minAcceptableOut2, out2, maxSlippageBps);
+        }
 
         // Calculate total debt with overflow protection (SEC-104)
         // Solidity 0.8+ provides automatic overflow checks

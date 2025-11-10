@@ -56,12 +56,15 @@ abstract contract FlashArbTestBase is Test {
     /**
      * @notice Calculate minimum output after slippage
      * @dev SEC-104: Uses Math.mulDiv to prevent overflow in extreme fuzz scenarios
+     * @dev SEC-201: Enforces maximum input cap to prevent unrealistic scenarios
      * @dev Applies slippage tolerance: quote * (10000 - slippageBps) / 10000
      * @param quote The quoted output amount
      * @param slippageBps Slippage in basis points
      * @return minOut Minimum acceptable output after slippage
      */
     function _minOutAfterSlippage(uint256 quote, uint256 slippageBps) internal pure returns (uint256) {
+        // SEC-201: Input cap validation - prevent unrealistic amounts (max 1e30 = 1 trillion tokens)
+        require(quote <= FuzzBounds.MAX_POOL_LIQUIDITY, "Input exceeds maximum cap");
         require(slippageBps <= FuzzBounds.MAX_SLIPPAGE_BPS, "Slippage too high");
         // Use Math.mulDiv for overflow-safe calculation
         return Math.mulDiv(quote, FuzzBounds.MAX_BPS - slippageBps, FuzzBounds.MAX_BPS);

@@ -305,9 +305,7 @@ contract SlippageEnforcementTest is FlashArbTestBase {
         deal(address(weth), address(flashArb), 100 ether);
         deal(address(dai), address(flashArb), 1000000 ether);
 
-        // Should revert due to slippage
-        vm.expectRevert();
-
+        // Prepare call parameters
         address[] memory assets = new address[](1);
         assets[0] = address(weth);
         uint256[] memory amounts = new uint256[](1);
@@ -315,6 +313,8 @@ contract SlippageEnforcementTest is FlashArbTestBase {
         uint256[] memory premiums = new uint256[](1);
         premiums[0] = 0.0009 ether;
 
+        // SEC-203: vm.expectRevert() must be immediately before the reverting call
+        vm.expectRevert();
         vm.prank(mockLendingPool);
         flashArb.executeOperation(assets, amounts, premiums, address(flashArb), params);
     }
