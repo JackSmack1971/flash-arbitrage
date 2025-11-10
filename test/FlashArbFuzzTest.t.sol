@@ -152,9 +152,15 @@ contract FlashArbFuzzTest is FlashArbTestBase {
         path2[0] = address(tokenB);
         path2[1] = address(tokenA);
 
-        // Use safer slippage calculation (5% slippage)
-        uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500);
+        // SEC-101: Use contract's on-chain slippage tolerance (200 BPS = 2%) instead of 500 BPS
+        // The contract validates with maxSlippageBps (200), so test must use same threshold
+        uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500); // Still pass 5% to params (user-specified)
         uint256 minOut2 = _minOutAfterSlippage(amountOut2, 500);
+
+        // SEC-101: Calculate on-chain validation thresholds (what contract will actually check)
+        // Contract uses 200 BPS for validation in executeOperation
+        uint256 onChainMinOut1 = Math.mulDiv(loanAmount, 9800, 10000); // 2% slippage from loan amount
+        uint256 onChainMinOut2 = Math.mulDiv(amountOut1, 9800, 10000); // 2% slippage from first swap out
 
         bytes memory params = abi.encode(
             address(router1),
@@ -170,12 +176,16 @@ contract FlashArbFuzzTest is FlashArbTestBase {
         );
 
         vm.prank(owner);
-        if (expectedProfit > 0 && amountOut2 >= minOut2 && amountOut1 >= minOut1) {
-            // Should succeed if profitable and slippage acceptable
+        // SEC-101: Check if trade would pass on-chain validation (200 BPS slippage)
+        // The contract validates: out1 >= _calculateMinOutput(_amount, 200) and out2 >= _calculateMinOutput(out1, 200)
+        bool passesOnChainSlippage = amountOut1 >= onChainMinOut1 && amountOut2 >= onChainMinOut2;
+
+        if (expectedProfit > 0 && passesOnChainSlippage && amountOut2 >= minOut2 && amountOut1 >= minOut1) {
+            // Should succeed if profitable and passes both user and on-chain slippage checks
             arb.startFlashLoan(address(tokenA), loanAmount, params);
             assertGe(arb.profits(address(tokenA)), 0);
         } else {
-            // Should revert if not profitable enough - error may not have data through callback
+            // Should revert if not profitable or fails slippage validation
             vm.expectRevert();
             arb.startFlashLoan(address(tokenA), loanAmount, params);
         }
@@ -373,6 +383,10 @@ contract FlashArbFuzzTest is FlashArbTestBase {
         uint256 minOut1 = _minOutAfterSlippage(amountOut1, 100); // 1% slippage
         uint256 minOut2 = _minOutAfterSlippage(amountOut2, 100); // 1% slippage
 
+        // SEC-101: Calculate on-chain validation thresholds (200 BPS)
+        uint256 onChainMinOut1 = Math.mulDiv(loanAmount, 9800, 10000);
+        uint256 onChainMinOut2 = Math.mulDiv(amountOut1, 9800, 10000);
+
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
         path1[1] = address(tokenB);
@@ -396,8 +410,12 @@ contract FlashArbFuzzTest is FlashArbTestBase {
 
         // Should succeed - we have profitable rates and bounded amounts
         vm.prank(owner);
-        // Ensure we have enough to repay
-        if (amountOut2 >= totalDebt && amountOut1 >= minOut1 && amountOut2 >= minOut2) {
+
+        // SEC-101: Check on-chain slippage validation
+        bool passesOnChainSlippage = amountOut1 >= onChainMinOut1 && amountOut2 >= onChainMinOut2;
+
+        // Ensure we have enough to repay and pass validation
+        if (amountOut2 >= totalDebt && passesOnChainSlippage && amountOut1 >= minOut1 && amountOut2 >= minOut2) {
             arb.startFlashLoan(address(tokenA), loanAmount, params);
         } else {
             // Should revert if cannot repay or slippage exceeded
@@ -437,6 +455,13 @@ contract FlashArbFuzzTest is FlashArbTestBase {
         uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500);
         uint256 minOut2 = _minOutAfterSlippage(amountOut2, 500);
 
+        // SEC-101: Calculate on-chain validation thresholds (what contract will actually check)
+        // Contract validates with 200 BPS (2% slippage) in executeOperation:
+        // - First swap: out1 >= _calculateMinOutput(_amount, 200)
+        // - Second swap: out2 >= _calculateMinOutput(out1, 200)
+        uint256 onChainMinOut1 = Math.mulDiv(loanAmount, 9800, 10000); // 2% slippage from loan amount
+        uint256 onChainMinOut2 = Math.mulDiv(amountOut1, 9800, 10000); // 2% slippage from first swap out
+
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
         path1[1] = address(tokenB);
@@ -460,16 +485,20 @@ contract FlashArbFuzzTest is FlashArbTestBase {
 
         vm.prank(owner);
 
+        // SEC-101: Check if trade would pass on-chain validation (200 BPS slippage)
+        // The contract's _calculateMinOutput uses maxSlippageBps (200) to validate swaps
+        bool passesOnChainSlippage = amountOut1 >= onChainMinOut1 && amountOut2 >= onChainMinOut2;
+
         // Should handle extreme rate differences
         // Can revert for multiple reasons: insufficient repayment, slippage exceeded, etc.
-        if (amountOut2 >= totalDebt && amountOut1 >= minOut1 && amountOut2 >= minOut2) {
-            // Should succeed if can repay AND slippage is acceptable
+        if (amountOut2 >= totalDebt && passesOnChainSlippage && amountOut1 >= minOut1 && amountOut2 >= minOut2) {
+            // Should succeed if can repay AND passes both user and on-chain slippage checks
             arb.startFlashLoan(address(tokenA), loanAmount, params);
             // Success - check invariants
             assertEq(tokenA.balanceOf(address(arb)), 0);
             assertEq(tokenB.balanceOf(address(arb)), 0);
         } else {
-            // Should revert if cannot repay or slippage too high
+            // Should revert if cannot repay or fails slippage validation
             vm.expectRevert();
             arb.startFlashLoan(address(tokenA), loanAmount, params);
         }
