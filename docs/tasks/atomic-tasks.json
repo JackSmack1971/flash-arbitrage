@@ -1,0 +1,819 @@
+{
+  "version": "1.0",
+  "goal": "Implement Phase 1 (Quick Wins) and Phase 2 (Infrastructure Reliability) optimizations for flash-arbitrage executor: custom errors for gas optimization, Aave V3 migration for fee reduction, multi-RPC failover for reliability, Flashbots integration for MEV protection, and forked mainnet simulation for pre-flight validation",
+  "assumptions": [
+    "Existing flash-arbitrage codebase is at commit with all AT-001 through AT-014 audit remediations complete",
+    "Foundry test suite passes with 95%+ coverage",
+    "Developer has access to Alchemy, Infura, and QuickNode RPC endpoints",
+    "Testnet (Sepolia) deployment infrastructure is functional",
+    "OpenZeppelin v5.5.0 upgradeable contracts are current dependencies",
+    "UUPS upgrade pattern is preserved throughout all modifications",
+    "Aave V2 flash loan interface is currently implemented in FlashArbMainnetReady.sol",
+    "No off-chain bot infrastructure currently exists (greenfield implementation)"
+  ],
+  "task_graph": {
+    "nodes": [
+      {
+        "id": "AT-015",
+        "title": "Define custom error types for all require statements",
+        "rationale": "Prerequisite for gas optimization; Solidity 0.8.4+ custom errors reduce deployment size by 10% and revert gas by 5%. Atomic because it only defines error types without modifying contract logic.",
+        "inputs": {
+          "preconditions": [
+            "FlashArbMainnetReady.sol exists with Solidity 0.8.21",
+            "All require() statements use string error messages",
+            "Contract compiles successfully with forge build"
+          ],
+          "artifacts_in": [
+            "src/contracts/FlashArbMainnetReady.sol"
+          ]
+        },
+        "actions": [
+          "Create src/contracts/errors/FlashArbErrors.sol file",
+          "Define custom error types matching all existing require() conditions: error AdapterNotApproved(address adapter), error RouterNotWhitelisted(address router), error TokenNotWhitelisted(address token), error InvalidDeadline(uint256 provided, uint256 min, uint256 max), error InsufficientProfit(uint256 profit, uint256 debt), error InvalidPathLength(uint256 length), error InvalidSlippage(uint256 bps), error ZeroAddress(), error ZeroAmount()",
+          "Add NatSpec documentation for each error with @notice and @param tags",
+          "Import error types in FlashArbMainnetReady.sol: import {FlashArbErrors} from './errors/FlashArbErrors.sol';",
+          "Verify compilation with forge build --sizes to confirm contract compiles"
+        ],
+        "artifacts_out": [
+          "src/contracts/errors/FlashArbErrors.sol"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "test/unit/FlashArbErrors.t.sol",
+              "description": "Create test file that verifies each custom error can be imported and used in test contexts - no revert expectations yet, just smoke test compilation"
+            }
+          ],
+          "checks": [
+            "forge build succeeds",
+            "forge build --sizes shows contract size unchanged (errors not yet used)",
+            "solc --version confirms 0.8.21+",
+            "Custom error file follows Solidity style guide"
+          ],
+          "DoD": [
+            "All 9 custom error types defined with NatSpec",
+            "Error file compiles without warnings",
+            "Error types match 1:1 with existing require() conditions",
+            "No contract logic modified (pure interface task)"
+          ]
+        },
+        "constraints": [
+          "No modification to FlashArbMainnetReady.sol logic",
+          "No test modifications yet",
+          "Error names must match existing require message semantics exactly"
+        ],
+        "est_size": "XS",
+        "rollback": "Delete src/contracts/errors/FlashArbErrors.sol and remove import from FlashArbMainnetReady.sol",
+        "idempotency": "Can re-run without side effects; file creation is deterministic. If file exists, overwrite with identical content.",
+        "dependencies": []
+      },
+      {
+        "id": "AT-016",
+        "title": "Replace require statements with custom error reverts in FlashArbMainnetReady.sol",
+        "rationale": "Core gas optimization implementation; atomic because it modifies only error handling without changing business logic. Single-surface change (error handling).",
+        "inputs": {
+          "preconditions": [
+            "AT-015 complete: FlashArbErrors.sol exists and compiles",
+            "All existing tests pass with require() statements",
+            "Contract follows Check-Effects-Interactions pattern"
+          ],
+          "artifacts_in": [
+            "src/contracts/FlashArbMainnetReady.sol",
+            "src/contracts/errors/FlashArbErrors.sol"
+          ]
+        },
+        "actions": [
+          "Replace each require(condition, 'message') with if (!condition) revert ErrorName(args)",
+          "Maintain exact same validation logic and order",
+          "Update executeOperation() deadline validation: if (deadline < block.timestamp || deadline > block.timestamp + MAX_DEADLINE) revert InvalidDeadline(deadline, block.timestamp, block.timestamp + MAX_DEADLINE);",
+          "Update startFlashLoan() validations: if (!routerWhitelist[router1]) revert RouterNotWhitelisted(router1);",
+          "Update adapter validations: if (!approvedAdapters[adapter]) revert AdapterNotApproved(adapter);",
+          "Update slippage checks: if (maxSlippageBps == 0 || maxSlippageBps > 10000) revert InvalidSlippage(maxSlippageBps);",
+          "Update profit validation: if (finalBalance < totalDebt) revert InsufficientProfit(finalBalance - totalDebt, totalDebt);",
+          "Verify no logic changes with git diff --word-diff to confirm only error handling modified"
+        ],
+        "artifacts_out": [
+          "src/contracts/FlashArbMainnetReady.sol"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "test/unit/FlashArbMainnetReady.t.sol",
+              "description": "Update all vm.expectRevert('string') to vm.expectRevert(abi.encodeWithSelector(ErrorName.selector, args)) - verify same test count passes"
+            },
+            {
+              "path": "test/fuzz/FlashArbFuzz.t.sol",
+              "description": "Update fuzz test revert expectations to match custom errors"
+            },
+            {
+              "path": "test/invariant/FlashArbInvariant.t.sol",
+              "description": "Verify invariant tests still pass with custom errors"
+            }
+          ],
+          "checks": [
+            "forge test passes all existing tests",
+            "forge build --sizes shows 10% deployment size reduction",
+            "forge test --gas-report shows 5% gas reduction in revert scenarios",
+            "No new compiler warnings"
+          ],
+          "DoD": [
+            "All require() statements replaced with custom error reverts",
+            "Zero test failures",
+            "Gas report confirms 5%+ savings on reverts",
+            "Contract size reduced by ~10%",
+            "No business logic changes (verified by test suite passing)"
+          ]
+        },
+        "constraints": [
+          "Preserve exact same validation conditions",
+          "Maintain Check-Effects-Interactions order",
+          "No changes to state variables or external calls",
+          "All existing test assertions must pass"
+        ],
+        "est_size": "S",
+        "rollback": "git revert <commit-hash> to restore require() statements; forge test confirms rollback success",
+        "idempotency": "Safe to reapply; if custom errors already in place, operation is no-op. Use git diff to verify idempotency.",
+        "dependencies": ["AT-015"]
+      },
+      {
+        "id": "AT-017",
+        "title": "Create Aave V3 interface abstractions for flash loan integration",
+        "rationale": "Prerequisite for V3 migration; atomic interface-only task that defines V3 contract surface without implementation. Separates interface definition from implementation logic.",
+        "inputs": {
+          "preconditions": [
+            "Aave V3 mainnet addresses verified: 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2",
+            "Aave V3 Sepolia addresses available for testnet",
+            "@aave/core-v3 package available or interfaces can be defined manually"
+          ],
+          "artifacts_in": []
+        },
+        "actions": [
+          "Create src/contracts/interfaces/IPoolV3.sol with minimal interface: flashLoan(address receiverAddress, address[] assets, uint256[] amounts, uint256[] interestRateModes, address onBehalfOf, bytes params, uint16 referralCode)",
+          "Create src/contracts/interfaces/IFlashLoanReceiverV3.sol with executeOperation(address[] assets, uint256[] amounts, uint256[] premiums, address initiator, bytes params) returns (bool)",
+          "Define V3-specific constants in separate file src/contracts/constants/AaveV3Constants.sol: address constant AAVE_V3_POOL_MAINNET = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2; address constant AAVE_V3_POOL_SEPOLIA = <sepolia-address>; uint256 constant AAVE_V3_FLASHLOAN_PREMIUM_TOTAL = 5; // 0.05%",
+          "Add NatSpec documentation explaining V3 interface differences from V2",
+          "Verify interfaces match official Aave V3 documentation"
+        ],
+        "artifacts_out": [
+          "src/contracts/interfaces/IPoolV3.sol",
+          "src/contracts/interfaces/IFlashLoanReceiverV3.sol",
+          "src/contracts/constants/AaveV3Constants.sol"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "test/unit/AaveV3Interfaces.t.sol",
+              "description": "Smoke test that imports V3 interfaces and constants; verify compilation and interface method signatures"
+            }
+          ],
+          "checks": [
+            "forge build compiles all interface files",
+            "Interface method signatures match Aave V3 docs exactly",
+            "Constants verified against Etherscan contract addresses"
+          ],
+          "DoD": [
+            "IPoolV3 interface complete with flashLoan() signature",
+            "IFlashLoanReceiverV3 interface complete with executeOperation() signature",
+            "Mainnet and Sepolia addresses defined as constants",
+            "V3 fee constant (5 BPS) defined",
+            "All interfaces have comprehensive NatSpec documentation"
+          ]
+        },
+        "constraints": [
+          "No implementation code",
+          "No modification to existing contracts",
+          "Interface-only definitions"
+        ],
+        "est_size": "XS",
+        "rollback": "Delete interface and constants files; no contract modifications to revert",
+        "idempotency": "Deterministic interface definitions; safe to re-create with identical content",
+        "dependencies": []
+      },
+      {
+        "id": "AT-018",
+        "title": "Add V3 flash loan execution logic with feature flag",
+        "rationale": "Atomic implementation of V3 flash loan initiation; feature flag allows safe testing without breaking existing V2 functionality. Single-intent: add V3 path while preserving V2.",
+        "inputs": {
+          "preconditions": [
+            "AT-017 complete: V3 interfaces and constants exist",
+            "AT-016 complete: Custom errors in place",
+            "Existing V2 flash loan logic passes all tests"
+          ],
+          "artifacts_in": [
+            "src/contracts/FlashArbMainnetReady.sol",
+            "src/contracts/interfaces/IPoolV3.sol",
+            "src/contracts/constants/AaveV3Constants.sol"
+          ]
+        },
+        "actions": [
+          "Add state variable: bool public useAaveV3 = false; // Feature flag for V3 migration",
+          "Add owner function: function setUseAaveV3(bool _useV3) external onlyOwner { useAaveV3 = _useV3; emit AaveVersionUpdated(_useV3); }",
+          "Create internal function _startFlashLoanV3(address asset, uint256 amount, bytes calldata params) that calls IPoolV3(AAVE_V3_POOL).flashLoan() with V3 signature",
+          "Modify startFlashLoan() to branch: if (useAaveV3) { _startFlashLoanV3(...); } else { _startFlashLoanV2(...); }",
+          "Add executeOperationV3() callback matching IFlashLoanReceiverV3 interface",
+          "Calculate V3 premium: uint256 premium = (amount * AAVE_V3_FLASHLOAN_PREMIUM_TOTAL) / 10000;",
+          "Ensure executeOperationV3 validates initiator and calls same arbitrage logic as V2",
+          "Emit AaveVersionUpdated(bool) event when feature flag toggled"
+        ],
+        "artifacts_out": [
+          "src/contracts/FlashArbMainnetReady.sol"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "test/unit/FlashArbV3.t.sol",
+              "description": "Test V3 flash loan initiation with useAaveV3=true; verify correct IPoolV3 call, premium calculation (5 BPS), and callback routing"
+            },
+            {
+              "path": "test/unit/FlashArbV3.t.sol",
+              "description": "Test feature flag toggle: verify V2 still works with useAaveV3=false, V3 works with useAaveV3=true"
+            },
+            {
+              "path": "test/integration/FlashArbV3Fork.t.sol",
+              "description": "Fork test against Sepolia: execute real V3 flash loan, verify 5 BPS fee charged, validate profit calculation"
+            }
+          ],
+          "checks": [
+            "forge test passes all existing V2 tests with useAaveV3=false",
+            "forge test passes new V3 tests with useAaveV3=true",
+            "forge test --gas-report shows similar gas cost between V2 and V3 (< 5% variance)",
+            "V3 fee calculation: 0.05% verified in fork tests"
+          ],
+          "DoD": [
+            "Feature flag implemented and toggleable by owner",
+            "V3 flash loan path functional on Sepolia testnet",
+            "V2 flash loan path preserved and still functional",
+            "Premium calculation correct (5 BPS vs 9 BPS)",
+            "All existing tests pass with V2 (default)",
+            "New V3 tests pass on forked Sepolia"
+          ]
+        },
+        "constraints": [
+          "Must not break existing V2 functionality",
+          "Feature flag must default to false (V2)",
+          "No removal of V2 code paths",
+          "Preserve all existing security validations"
+        ],
+        "est_size": "M",
+        "rollback": "Set useAaveV3=false; optionally revert commit to remove V3 code paths. V2 functionality must remain intact.",
+        "idempotency": "Feature flag state determines behavior; safe to re-deploy with same flag value. Toggle is idempotent.",
+        "dependencies": ["AT-016", "AT-017"]
+      },
+      {
+        "id": "AT-019",
+        "title": "Deploy and validate V3 integration on Sepolia testnet",
+        "rationale": "Atomic deployment task that proves V3 integration works in real network conditions before mainnet. Pure deployment/validation, no code changes.",
+        "inputs": {
+          "preconditions": [
+            "AT-018 complete: V3 flash loan logic implemented",
+            "Sepolia RPC endpoint configured in foundry.toml",
+            "Deployer wallet has Sepolia ETH for gas",
+            "Aave V3 deployed on Sepolia with sufficient liquidity"
+          ],
+          "artifacts_in": [
+            "src/contracts/FlashArbMainnetReady.sol",
+            "script/Deploy.s.sol"
+          ]
+        },
+        "actions": [
+          "Update Deploy.s.sol to support Sepolia deployment with V3 addresses",
+          "Deploy contract to Sepolia: forge script script/Deploy.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast --verify",
+          "Verify contract on Etherscan Sepolia",
+          "Call setUseAaveV3(true) on deployed contract",
+          "Execute test arbitrage with small amount (0.1 ETH): verify flash loan initiated from Aave V3 pool",
+          "Monitor transaction logs: verify FlashLoanExecuted event shows 5 BPS fee (not 9 BPS)",
+          "Validate profit calculation: finalBalance - totalDebt where totalDebt includes 5 BPS premium",
+          "Document Sepolia contract address and transaction hashes in deployment log"
+        ],
+        "artifacts_out": [
+          "deployment/sepolia-v3-deployment.json with contract address and tx hashes",
+          "deployment/sepolia-v3-validation-report.md with test results"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "deployment/sepolia-v3-validation-report.md",
+              "description": "Manual validation report confirming: 1) V3 flash loan executes successfully, 2) Fee charged is 5 BPS, 3) Gas cost within 5% of V2, 4) Profit calculation correct"
+            }
+          ],
+          "checks": [
+            "Contract deployed and verified on Sepolia Etherscan",
+            "Test transaction mined successfully",
+            "FlashLoanExecuted event emitted with correct parameters",
+            "Fee calculation shows 0.05% (5 BPS) in transaction logs",
+            "No reverts or failed transactions"
+          ],
+          "DoD": [
+            "Sepolia contract deployed at verified address",
+            "At least 1 successful V3 flash loan executed on Sepolia",
+            "Fee reduction from 9 BPS to 5 BPS confirmed in logs",
+            "Gas cost comparable to V2 (< 5% difference)",
+            "Deployment report documents all validation steps",
+            "Contract ownership transferred to test multi-sig or kept as deployer for testing"
+          ]
+        },
+        "constraints": [
+          "Testnet only - no mainnet deployment",
+          "Use small flash loan amounts (0.1-1 ETH)",
+          "No real profit expectations (testnet liquidity constraints)"
+        ],
+        "est_size": "S",
+        "rollback": "No rollback needed for testnet; can redeploy fresh contract if needed. Document failed deployment in report.",
+        "idempotency": "Each deployment creates new contract instance; not idempotent by nature. Use deployment log to track instances.",
+        "dependencies": ["AT-018"]
+      },
+      {
+        "id": "AT-020",
+        "title": "Create multi-RPC provider failover infrastructure with health checks",
+        "rationale": "Atomic off-chain infrastructure task; builds RPC resilience layer independently of contract code. Single intent: reliable RPC access.",
+        "inputs": {
+          "preconditions": [
+            "Alchemy, Infura, and QuickNode RPC URLs available",
+            "Node.js 18+ environment available",
+            "ethers.js v6 available"
+          ],
+          "artifacts_in": []
+        },
+        "actions": [
+          "Create new directory: mkdir -p infrastructure/rpc-provider",
+          "Initialize Node.js project: cd infrastructure/rpc-provider && npm init -y",
+          "Install dependencies: npm install ethers dotenv",
+          "Create infrastructure/rpc-provider/src/FallbackProvider.ts with ethers.FallbackProvider configuration: priority weights (Alchemy:2, Infura:1, QuickNode:1), stallTimeout: 5000ms, quorum: 1",
+          "Implement health check function that queries getBlockNumber() every 30 seconds",
+          "Add failure detection logic: log provider failures, emit alerts after 3 consecutive failures",
+          "Create .env.example with RPC_ALCHEMY_URL, RPC_INFURA_URL, RPC_QUICKNODE_URL placeholders",
+          "Implement exponential backoff for failed providers: 10s, 30s, 60s, 300s",
+          "Add TypeScript types for provider configuration and health check results"
+        ],
+        "artifacts_out": [
+          "infrastructure/rpc-provider/package.json",
+          "infrastructure/rpc-provider/src/FallbackProvider.ts",
+          "infrastructure/rpc-provider/src/HealthCheck.ts",
+          "infrastructure/rpc-provider/.env.example",
+          "infrastructure/rpc-provider/tsconfig.json"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "infrastructure/rpc-provider/src/__tests__/FallbackProvider.test.ts",
+              "description": "Unit test: verify FallbackProvider initializes with 3 endpoints, correct priority weights, and stallTimeout configuration"
+            },
+            {
+              "path": "infrastructure/rpc-provider/src/__tests__/HealthCheck.test.ts",
+              "description": "Unit test: mock provider failures, verify exponential backoff, verify alert emission after 3 failures"
+            },
+            {
+              "path": "infrastructure/rpc-provider/src/__tests__/Integration.test.ts",
+              "description": "Integration test: connect to real Sepolia testnet via failover provider, verify automatic failover when primary provider is unreachable (simulate by using invalid URL)"
+            }
+          ],
+          "checks": [
+            "npm test passes all unit and integration tests",
+            "TypeScript compilation succeeds: npx tsc --noEmit",
+            "FallbackProvider successfully connects to Sepolia testnet",
+            "Health check detects and logs provider failures",
+            "Exponential backoff delays verified in test logs"
+          ],
+          "DoD": [
+            "FallbackProvider class implemented with 3 RPC endpoints",
+            "Health check runs every 30 seconds with failure detection",
+            "Exponential backoff implemented for failed providers",
+            "Alert mechanism (console.log) triggers after 3 failures",
+            "All tests pass with 100% coverage of failover logic",
+            ".env.example documented with clear setup instructions"
+          ]
+        },
+        "constraints": [
+          "No contract interactions in this task",
+          "No arbitrage bot logic - pure RPC infrastructure",
+          "Must support both mainnet and testnet configurations"
+        ],
+        "est_size": "S",
+        "rollback": "Delete infrastructure/rpc-provider directory; no dependencies on contract code",
+        "idempotency": "Safe to re-initialize; npm install is idempotent; configuration files can be overwritten",
+        "dependencies": []
+      },
+      {
+        "id": "AT-021",
+        "title": "Integrate Flashbots RPC endpoint for private transaction submission",
+        "rationale": "Atomic MEV protection layer; adds Flashbots submission path without modifying existing RPC infrastructure. Single surface: transaction submission.",
+        "inputs": {
+          "preconditions": [
+            "AT-020 complete: Multi-RPC provider infrastructure exists",
+            "Flashbots Relay RPC URL: https://relay.flashbots.net",
+            "ethers.js v6 with Flashbots support available"
+          ],
+          "artifacts_in": [
+            "infrastructure/rpc-provider/src/FallbackProvider.ts"
+          ]
+        },
+        "actions": [
+          "Install Flashbots SDK: npm install @flashbots/ethers-provider-bundle",
+          "Create infrastructure/rpc-provider/src/FlashbotsProvider.ts implementing FlashbotsBundleProvider",
+          "Add environment variable FLASHBOTS_AUTH_SIGNER for authentication",
+          "Implement sendFlashbotsBundle(transactions, targetBlock) method",
+          "Add simulation function simulateBundle() to pre-validate profitability before submission",
+          "Implement bundle status polling: wait for bundle inclusion up to 25 blocks",
+          "Add fallback logic: if bundle not included after 25 blocks, resubmit via public mempool",
+          "Create FlashbotsConfig interface with targetBlock, maxBlockNumber, revertingTxHashes",
+          "Document Flashbots-specific parameters: coinbase payment, bundle priority"
+        ],
+        "artifacts_out": [
+          "infrastructure/rpc-provider/src/FlashbotsProvider.ts",
+          "infrastructure/rpc-provider/src/types/FlashbotsConfig.ts"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "infrastructure/rpc-provider/src/__tests__/FlashbotsProvider.test.ts",
+              "description": "Unit test: verify FlashbotsBundleProvider initialization, auth signer setup, bundle construction with valid transaction format"
+            },
+            {
+              "path": "infrastructure/rpc-provider/src/__tests__/FlashbotsSimulation.test.ts",
+              "description": "Integration test: simulate bundle on Sepolia, verify simulation API response, validate profit calculation"
+            },
+            {
+              "path": "infrastructure/rpc-provider/src/__tests__/FlashbotsSubmission.test.ts",
+              "description": "Integration test: submit test bundle to Flashbots Sepolia relay (non-production), verify bundle status polling, validate fallback to public mempool after timeout"
+            }
+          ],
+          "checks": [
+            "npm test passes all Flashbots provider tests",
+            "TypeScript compilation succeeds",
+            "Bundle simulation returns valid response from Flashbots API",
+            "Authentication signer successfully signs bundle",
+            "Status polling correctly detects bundle inclusion or timeout"
+          ],
+          "DoD": [
+            "FlashbotsProvider class implemented with sendBundle and simulate methods",
+            "Auth signer configuration documented in .env.example",
+            "Bundle simulation validates profitability before submission",
+            "Status polling waits up to 25 blocks for inclusion",
+            "Fallback to public mempool after timeout implemented",
+            "All tests pass including simulation and submission integration tests",
+            "Documentation explains Flashbots transaction flow"
+          ]
+        },
+        "constraints": [
+          "No modification to contract code",
+          "Flashbots Sepolia testnet only for validation",
+          "No mainnet Flashbots submissions in tests"
+        ],
+        "est_size": "M",
+        "rollback": "Remove FlashbotsProvider.ts; use standard RPC submission. No contract dependencies.",
+        "idempotency": "Safe to re-configure; Flashbots provider initialization is stateless; auth signer can be regenerated",
+        "dependencies": ["AT-020"]
+      },
+      {
+        "id": "AT-022",
+        "title": "Implement forked mainnet simulation for pre-flight arbitrage validation",
+        "rationale": "Atomic validation layer; simulates arbitrage on forked state before real submission. Single intent: validate profitability and prevent failed transactions.",
+        "inputs": {
+          "preconditions": [
+            "AT-020 complete: RPC provider infrastructure exists",
+            "Foundry Anvil available for mainnet forking",
+            "Fast RPC endpoint (Alchemy/QuickNode) for fork source"
+          ],
+          "artifacts_in": [
+            "infrastructure/rpc-provider/src/FallbackProvider.ts"
+          ]
+        },
+        "actions": [
+          "Create infrastructure/simulation/src/AnvilFork.ts that spawns Anvil fork process: anvil --fork-url $MAINNET_RPC_URL --fork-block-number <current>",
+          "Implement simulateArbitrage(params) function that: 1) Spawns Anvil fork at current block, 2) Sends arbitrage transaction to fork, 3) Analyzes transaction receipt for profitability, 4) Kills Anvil process after simulation",
+          "Add gas estimation: estimate gas cost at current base fee + priority fee",
+          "Implement profit calculation: expectedProfit = swapProfit - flashLoanFee - gasCost",
+          "Add threshold check: if (expectedProfit < MIN_PROFIT_THRESHOLD) revert simulation as unprofitable",
+          "Implement slippage validation: verify actual output amounts match expected within maxSlippageBps",
+          "Add simulation timeout: kill Anvil process if simulation exceeds 10 seconds",
+          "Create SimulationResult interface with: success: bool, expectedProfit: bigint, gasUsed: bigint, revertReason: string",
+          "Document simulation flow and failure scenarios"
+        ],
+        "artifacts_out": [
+          "infrastructure/simulation/src/AnvilFork.ts",
+          "infrastructure/simulation/src/types/SimulationResult.ts",
+          "infrastructure/simulation/src/ProfitCalculator.ts"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "infrastructure/simulation/src/__tests__/AnvilFork.test.ts",
+              "description": "Unit test: verify Anvil fork spawns successfully, accepts transactions, returns valid receipts, and terminates cleanly"
+            },
+            {
+              "path": "infrastructure/simulation/src/__tests__/SimulateArbitrage.test.ts",
+              "description": "Integration test: fork current mainnet, simulate profitable arbitrage, verify expectedProfit calculation includes all fees (flash loan 5 BPS + gas)"
+            },
+            {
+              "path": "infrastructure/simulation/src/__tests__/SimulateUnprofitable.test.ts",
+              "description": "Integration test: simulate unprofitable arbitrage (high gas, low spread), verify simulation correctly rejects as unprofitable"
+            },
+            {
+              "path": "infrastructure/simulation/src/__tests__/SimulateSlippage.test.ts",
+              "description": "Integration test: simulate arbitrage with high slippage, verify simulation detects slippage exceeding maxSlippageBps"
+            }
+          ],
+          "checks": [
+            "npm test passes all simulation tests",
+            "Anvil fork spawns and terminates without zombie processes",
+            "Simulation completes within 10 second timeout",
+            "Profit calculation includes flash loan fee, gas cost, and slippage",
+            "MIN_PROFIT_THRESHOLD configurable via environment variable"
+          ],
+          "DoD": [
+            "AnvilFork class spawns/kills Anvil process reliably",
+            "simulateArbitrage() validates profitability before submission",
+            "Gas estimation uses current base fee + priority fee",
+            "Profit threshold check prevents unprofitable transactions",
+            "Slippage validation ensures swap outputs within tolerance",
+            "All tests pass with 100% coverage of simulation paths",
+            "Simulation timeout prevents hung processes",
+            "Documentation explains simulation workflow and failure handling"
+          ]
+        },
+        "constraints": [
+          "No modification to contract code",
+          "Requires fast RPC endpoint for fork performance",
+          "Simulation must complete in < 10 seconds for latency sensitivity"
+        ],
+        "est_size": "M",
+        "rollback": "Remove simulation infrastructure; submit transactions without pre-flight validation. No contract dependencies.",
+        "idempotency": "Safe to re-run; Anvil fork creation is stateless; each simulation spawns fresh fork",
+        "dependencies": ["AT-020"]
+      },
+      {
+        "id": "AT-023",
+        "title": "Create arbitrage bot orchestrator with RPC failover, Flashbots, and simulation integration",
+        "rationale": "Atomic orchestration layer; integrates all infrastructure components into executable bot. Single intent: end-to-end arbitrage execution flow.",
+        "inputs": {
+          "preconditions": [
+            "AT-020 complete: Multi-RPC failover implemented",
+            "AT-021 complete: Flashbots provider implemented",
+            "AT-022 complete: Forked mainnet simulation implemented",
+            "FlashArbMainnetReady.sol deployed on mainnet with V3 enabled"
+          ],
+          "artifacts_in": [
+            "infrastructure/rpc-provider/src/FallbackProvider.ts",
+            "infrastructure/rpc-provider/src/FlashbotsProvider.ts",
+            "infrastructure/simulation/src/AnvilFork.ts"
+          ]
+        },
+        "actions": [
+          "Create infrastructure/bot/src/ArbitrageBot.ts orchestrator class",
+          "Implement main execution flow: 1) Detect arbitrage opportunity (placeholder - manual trigger for now), 2) Simulate via AnvilFork, 3) If profitable, submit via FlashbotsProvider, 4) If Flashbots fails, fallback to public mempool, 5) Monitor transaction status, 6) Log results",
+          "Add configuration: MIN_PROFIT_THRESHOLD (default $30), MAX_GAS_PRICE (default 50 gwei), FLASHBOTS_ENABLED (default true)",
+          "Implement transaction builder: construct startFlashLoan() calldata with swap parameters",
+          "Add signer management: load private key from environment, sign transactions with EIP-1559",
+          "Implement monitoring loop: poll for arbitrage opportunities every 12 seconds (1 block)",
+          "Add graceful shutdown: handle SIGINT/SIGTERM to close provider connections cleanly",
+          "Create logging infrastructure: structured JSON logs with timestamps, transaction hashes, profit outcomes",
+          "Document bot operation flow and configuration options"
+        ],
+        "artifacts_out": [
+          "infrastructure/bot/src/ArbitrageBot.ts",
+          "infrastructure/bot/src/config/BotConfig.ts",
+          "infrastructure/bot/src/TransactionBuilder.ts",
+          "infrastructure/bot/src/Logger.ts"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "infrastructure/bot/src/__tests__/ArbitrageBot.test.ts",
+              "description": "Unit test: verify bot initializes with correct config, connects to RPC providers, loads signer, and constructs valid transaction calldata"
+            },
+            {
+              "path": "infrastructure/bot/src/__tests__/ExecutionFlow.test.ts",
+              "description": "Integration test: mock opportunity detection, verify simulation → Flashbots submission → status monitoring flow with all components"
+            },
+            {
+              "path": "infrastructure/bot/src/__tests__/FlashbotsFallback.test.ts",
+              "description": "Integration test: simulate Flashbots failure (bundle not included), verify fallback to public mempool submission"
+            },
+            {
+              "path": "infrastructure/bot/src/__tests__/ProfitThreshold.test.ts",
+              "description": "Integration test: simulate opportunities below MIN_PROFIT_THRESHOLD, verify bot skips unprofitable arbitrage"
+            }
+          ],
+          "checks": [
+            "npm test passes all bot orchestration tests",
+            "Bot starts and connects to all RPC providers successfully",
+            "Transaction builder produces valid FlashArbMainnetReady.startFlashLoan() calldata",
+            "Graceful shutdown closes all connections without errors",
+            "Logs structured JSON with all required fields"
+          ],
+          "DoD": [
+            "ArbitrageBot orchestrator integrates RPC failover, Flashbots, and simulation",
+            "Execution flow: detect → simulate → submit → monitor",
+            "Configuration allows MIN_PROFIT_THRESHOLD, MAX_GAS_PRICE customization",
+            "Flashbots submission with fallback to public mempool",
+            "Transaction builder constructs valid contract calls",
+            "Monitoring loop polls every block (12 seconds)",
+            "Graceful shutdown implemented",
+            "Structured logging captures all execution details",
+            "All tests pass with end-to-end flow validation",
+            "Documentation explains bot architecture and operation"
+          ]
+        },
+        "constraints": [
+          "No contract modifications",
+          "Opportunity detection is placeholder (manual trigger) - full opportunity scanner is future work",
+          "Bot operates on Sepolia testnet for validation before mainnet"
+        ],
+        "est_size": "M",
+        "rollback": "Stop bot process; no persistent state changes. Can restart with different configuration.",
+        "idempotency": "Bot startup is idempotent; multiple instances should not be run simultaneously (race conditions)",
+        "dependencies": ["AT-020", "AT-021", "AT-022"]
+      },
+      {
+        "id": "AT-024",
+        "title": "Deploy Phase 1 optimizations to mainnet and validate gas/fee savings",
+        "rationale": "Atomic deployment task proving Phase 1 ROI (custom errors + Aave V3). Pure deployment/validation with no code changes.",
+        "inputs": {
+          "preconditions": [
+            "AT-016 complete: Custom errors implemented",
+            "AT-018 complete: Aave V3 migration implemented",
+            "AT-019 complete: Sepolia validation passed",
+            "Deployer wallet has mainnet ETH for gas and deployment costs",
+            "Multi-sig wallet address available for ownership transfer (recommended)"
+          ],
+          "artifacts_in": [
+            "src/contracts/FlashArbMainnetReady.sol",
+            "script/Deploy.s.sol"
+          ]
+        },
+        "actions": [
+          "Deploy contract to mainnet: forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL --broadcast --verify",
+          "Verify contract on Etherscan mainnet",
+          "Configure initial parameters: set token whitelist, router whitelist, adapter approvals",
+          "Call setUseAaveV3(true) to enable V3 flash loans",
+          "Execute small test arbitrage (0.1 ETH) to validate deployment",
+          "Monitor transaction: verify custom error format in logs, verify 5 BPS flash loan fee charged",
+          "Compare gas cost vs previous deployment: forge test --gas-report vs production transaction receipt",
+          "Calculate savings: measure deployment size reduction (expect -10%), gas cost reduction (expect -5% on reverts), flash loan fee reduction (expect -44%: 9 BPS → 5 BPS)",
+          "Transfer ownership to multi-sig wallet (if available)",
+          "Document mainnet deployment in deployment/mainnet-phase1-deployment.json"
+        ],
+        "artifacts_out": [
+          "deployment/mainnet-phase1-deployment.json",
+          "deployment/mainnet-phase1-validation-report.md"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "deployment/mainnet-phase1-validation-report.md",
+              "description": "Manual validation report confirming: 1) Deployment size reduced by 10%, 2) Gas cost for reverts reduced by 5%, 3) Flash loan fee reduced from 9 BPS to 5 BPS, 4) Test arbitrage executed successfully on mainnet"
+            }
+          ],
+          "checks": [
+            "Contract deployed and verified on Etherscan mainnet",
+            "Test transaction mined successfully with no reverts",
+            "Custom errors visible in Etherscan transaction logs",
+            "Flash loan fee calculated as 5 BPS (0.05%) in transaction",
+            "Gas report shows deployment size reduction: ~10%",
+            "Ownership transferred to multi-sig (if available)"
+          ],
+          "DoD": [
+            "Mainnet contract deployed at verified address",
+            "At least 1 successful arbitrage executed on mainnet with V3",
+            "Deployment size reduced by 10% confirmed via forge build --sizes comparison",
+            "Gas savings on reverts (5%) measured via gas reports",
+            "Flash loan fee savings (44%: 9 BPS → 5 BPS) confirmed in transaction logs",
+            "Validation report documents all metrics and savings",
+            "Contract configured with production parameters (whitelists, adapters)",
+            "Ownership transferred to multi-sig wallet (if planned) or documented as single-owner risk"
+          ]
+        },
+        "constraints": [
+          "Mainnet deployment - use production RPC endpoints and secure key management",
+          "Small test arbitrage only (0.1-1 ETH) to validate deployment",
+          "Multi-sig ownership transfer recommended but optional for Phase 1"
+        ],
+        "est_size": "S",
+        "rollback": "Cannot rollback mainnet deployment; can deploy new version if critical issues found. Document rollback procedure in validation report.",
+        "idempotency": "Each mainnet deployment creates new contract instance; not idempotent. Use deployment log to track instances.",
+        "dependencies": ["AT-016", "AT-018", "AT-019"]
+      },
+      {
+        "id": "AT-025",
+        "title": "Document Phase 1 & 2 results and create Phase 3 roadmap",
+        "rationale": "Atomic documentation task capturing Phase 1/2 outcomes and planning Phase 3. Single intent: project state synthesis and future planning.",
+        "inputs": {
+          "preconditions": [
+            "AT-024 complete: Phase 1 mainnet deployment validated",
+            "AT-023 complete: Bot orchestrator operational",
+            "All Phase 1 & 2 validation reports exist"
+          ],
+          "artifacts_in": [
+            "deployment/sepolia-v3-validation-report.md",
+            "deployment/mainnet-phase1-validation-report.md"
+          ]
+        },
+        "actions": [
+          "Create docs/phases/phase1-phase2-results.md documenting: 1) Custom errors savings (10% deployment, 5% gas), 2) Aave V3 fee savings (44%: 9 BPS → 5 BPS), 3) RPC failover uptime improvement (99.5% → 99.99%), 4) Flashbots integration status, 5) Simulation validation results",
+          "Calculate total ROI: aggregate gas savings, flash loan fee savings, uptime improvement value, estimated annual savings",
+          "Document lessons learned: deployment challenges, test insights, infrastructure bottlenecks",
+          "Create docs/phases/phase3-roadmap.md outlining: 1) Layer 2 deployment (Arbitrum), 2) dYdX flash loan integration (0% fees), 3) Storage layout optimization, 4) Multi-DEX opportunity scanner, 5) Advanced MEV strategies",
+          "Define Phase 3 success metrics: L2 gas savings (-90%), dYdX fee elimination, opportunity capture rate (+15-20%)",
+          "Create Phase 3 task prioritization matrix: effort vs impact vs risk",
+          "Document known limitations: single-owner control, manual opportunity detection, limited DEX coverage",
+          "Add recommendations for Phase 3: formal security audit for L2 deployment, insurance coverage for high TVL, bug bounty program"
+        ],
+        "artifacts_out": [
+          "docs/phases/phase1-phase2-results.md",
+          "docs/phases/phase3-roadmap.md",
+          "docs/phases/roi-analysis.md"
+        ],
+        "acceptance": {
+          "tests": [
+            {
+              "path": "docs/phases/phase1-phase2-results.md",
+              "description": "Documentation completeness check: verify all Phase 1/2 metrics documented with evidence (transaction hashes, gas reports)"
+            }
+          ],
+          "checks": [
+            "All Phase 1/2 validation reports synthesized",
+            "ROI calculation includes all cost savings categories",
+            "Phase 3 roadmap prioritizes tasks by impact/effort",
+            "Lessons learned capture deployment insights",
+            "Documentation follows project standards (Markdown, proper headers)"
+          ],
+          "DoD": [
+            "Phase 1/2 results document complete with metrics and evidence",
+            "ROI analysis calculates total annual savings from optimizations",
+            "Phase 3 roadmap defines clear objectives and success metrics",
+            "Task prioritization matrix guides Phase 3 execution",
+            "Known limitations documented for transparency",
+            "Recommendations for Phase 3 security and operations",
+            "All documentation peer-reviewed for accuracy"
+          ]
+        },
+        "constraints": [
+          "No code changes",
+          "Pure documentation task",
+          "Must reference concrete evidence (tx hashes, gas reports, logs)"
+        ],
+        "est_size": "XS",
+        "rollback": "Revert documentation commits if needed; no impact on code or deployments",
+        "idempotency": "Documentation can be updated iteratively; safe to revise and commit multiple times",
+        "dependencies": ["AT-024", "AT-023"]
+      }
+    ],
+    "edges": [
+      {
+        "from": "AT-015",
+        "to": "AT-016",
+        "reason": "Custom error types must exist before replacing require() statements"
+      },
+      {
+        "from": "AT-016",
+        "to": "AT-018",
+        "reason": "Custom errors in place before adding V3 logic ensures consistent error handling"
+      },
+      {
+        "from": "AT-017",
+        "to": "AT-018",
+        "reason": "V3 interfaces must exist before implementing V3 flash loan logic"
+      },
+      {
+        "from": "AT-018",
+        "to": "AT-019",
+        "reason": "V3 implementation must be complete before Sepolia deployment"
+      },
+      {
+        "from": "AT-019",
+        "to": "AT-024",
+        "reason": "Sepolia validation must pass before mainnet deployment"
+      },
+      {
+        "from": "AT-020",
+        "to": "AT-021",
+        "reason": "RPC failover infrastructure required before adding Flashbots provider"
+      },
+      {
+        "from": "AT-020",
+        "to": "AT-022",
+        "reason": "RPC provider infrastructure required for forked mainnet simulation"
+      },
+      {
+        "from": "AT-021",
+        "to": "AT-023",
+        "reason": "Flashbots provider must exist before bot orchestration"
+      },
+      {
+        "from": "AT-022",
+        "to": "AT-023",
+        "reason": "Simulation infrastructure must exist before bot orchestration"
+      },
+      {
+        "from": "AT-023",
+        "to": "AT-025",
+        "reason": "Bot must be operational before documenting Phase 2 results"
+      },
+      {
+        "from": "AT-024",
+        "to": "AT-025",
+        "reason": "Mainnet deployment must be validated before documenting Phase 1/2 results"
+      }
+    ]
+  }
+}
