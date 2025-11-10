@@ -42,6 +42,10 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "./interfaces/IDexInterfaces.sol";
+import "./interfaces/IPoolV3.sol";
+import "./interfaces/IFlashLoanReceiverV3.sol";
+import "./constants/AaveV3Constants.sol";
+import "./errors/FlashArbErrors.sol";
 
 interface ILendingPoolAddressesProvider {
     function getLendingPool() external view returns (address);
@@ -76,14 +80,7 @@ interface IWETH is IERC20 {
     function withdraw(uint256 wad) external;
 }
 
-/**
- * @notice Custom errors for improved gas efficiency and clarity
- */
-error AdapterSecurityViolation(address adapter, string reason);
-error SlippageExceeded(uint256 expected, uint256 actual, uint256 maxBps);
-error PathTooLong(uint256 pathLength, uint256 maxAllowed);
-
-contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
+contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
 
     // --- Hardcoded common mainnet addresses (verify before use) ---
@@ -96,6 +93,10 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
     ILendingPoolAddressesProvider public provider;
     address public lendingPool;
+
+    // Aave V3 Integration (AT-018)
+    bool public useAaveV3; // Feature flag for V3 migration (default: false = V2)
+    address public poolV3;  // Aave V3 Pool address (set based on network)
 
     mapping(address => bool) public routerWhitelist;
     mapping(address => bool) public tokenWhitelist;
@@ -130,6 +131,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     event MaxPathLengthUpdated(uint8 newMaxPathLength);
     event MaxSlippageUpdated(uint256 newMaxSlippageBps);
     event EmergencyWithdrawn(address indexed token, address indexed to, uint256 amount);
+    event AaveVersionUpdated(bool useV3, address pool); // AT-018: V3 migration event
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -215,14 +217,14 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
     }
 
     function updateProvider(address _provider) external onlyOwner {
-        require(_provider != address(0), "provider-zero");
+        if (_provider == address(0)) revert ZeroAddress();
         provider = ILendingPoolAddressesProvider(_provider);
         lendingPool = provider.getLendingPool();
         emit ProviderUpdated(_provider, lendingPool);
     }
 
     function setMaxSlippage(uint256 bps) external onlyOwner {
-        require(bps <= 1000, "max 10% allowed");
+        if (bps > 1000) revert InvalidSlippage(bps);
         maxSlippageBps = bps;
         emit MaxSlippageUpdated(bps);
     }
@@ -233,8 +235,8 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
      * @param _maxAllowance New maximum allowance (must be >= 1e24 to support large operations)
      */
     function setMaxAllowance(uint256 _maxAllowance) external onlyOwner {
-        require(_maxAllowance >= 1e24, "Allowance too low");
-        require(_maxAllowance <= type(uint256).max, "Allowance overflow");
+        if (_maxAllowance < 1e24) revert ZeroAmount();
+        if (_maxAllowance > type(uint256).max) revert ZeroAmount(); // Redundant but explicit
         maxAllowance = _maxAllowance;
         emit MaxAllowanceUpdated(_maxAllowance);
     }
@@ -245,8 +247,8 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
      * @param _maxPathLength New maximum path length (2-10 hops)
      */
     function setMaxPathLength(uint8 _maxPathLength) external onlyOwner {
-        require(_maxPathLength >= 2, "Path length too short");
-        require(_maxPathLength <= 10, "Path length too long");
+        if (_maxPathLength < 2) revert InvalidPathLength(_maxPathLength);
+        if (_maxPathLength > 10) revert PathTooLong(_maxPathLength, 10);
         maxPathLength = _maxPathLength;
         emit MaxPathLengthUpdated(_maxPathLength);
     }
@@ -256,11 +258,15 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
      * @dev Two-step validation: both address and bytecode hash must be approved
      */
     function approveAdapter(address adapter, bool approved) external onlyOwner nonReentrant {
-        require(adapter != address(0), "adapter-zero");
-        require(adapter.code.length > 0, "adapter-not-contract");
+        if (adapter == address(0)) revert ZeroAddress();
+        if (adapter.code.length == 0) {
+            revert AdapterSecurityViolation(adapter, "Adapter must be a contract");
+        }
 
         bytes32 codeHash = adapter.codehash;
-        require(codeHash != bytes32(0), "invalid-code-hash");
+        if (codeHash == bytes32(0)) {
+            revert AdapterSecurityViolation(adapter, "Invalid code hash");
+        }
 
         approvedAdapters[adapter] = approved;
         emit AdapterApproved(adapter, codeHash, approved);
@@ -271,7 +277,9 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
      * @dev Allows pre-approving bytecode before deployment
      */
     function approveAdapterCodeHash(bytes32 codeHash, bool approved) external onlyOwner nonReentrant {
-        require(codeHash != bytes32(0), "invalid-code-hash");
+        if (codeHash == bytes32(0)) {
+            revert AdapterSecurityViolation(address(0), "Invalid code hash");
+        }
         approvedAdapterCodeHashes[codeHash] = approved;
         emit AdapterCodeHashApproved(codeHash, approved);
     }
@@ -282,17 +290,21 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
      * @dev Protected with nonReentrant to prevent adapter reentrancy during setup
      */
     function setDexAdapter(address router, address adapter) external onlyOwner nonReentrant {
-        require(routerWhitelist[router], "router-not-whitelisted");
+        if (!routerWhitelist[router]) revert RouterNotWhitelisted(router);
 
         // Security: If adapter is non-zero, validate it's approved
         if (adapter != address(0)) {
-            require(approvedAdapters[adapter], "adapter-not-approved");
+            if (!approvedAdapters[adapter]) revert AdapterNotApproved(adapter);
 
             bytes32 codeHash = adapter.codehash;
-            require(approvedAdapterCodeHashes[codeHash], "adapter-code-hash-not-approved");
+            if (!approvedAdapterCodeHashes[codeHash]) {
+                revert AdapterSecurityViolation(adapter, "Adapter bytecode not approved");
+            }
 
             // Validate adapter is a contract
-            require(adapter.code.length > 0, "adapter-not-contract");
+            if (adapter.code.length == 0) {
+                revert AdapterSecurityViolation(adapter, "Adapter must be a contract");
+            }
         }
 
         dexAdapters[router] = IDexAdapter(adapter);
@@ -311,26 +323,70 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         emit TrustedInitiatorChanged(initiator, trusted);
     }
 
+    /**
+     * @notice Set Aave V3 Pool address for network-specific deployment
+     * @dev Must be called before enabling useAaveV3 flag
+     * @param _poolV3 Address of Aave V3 Pool (mainnet: 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2, Sepolia: 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951)
+     */
+    function setPoolV3(address _poolV3) external onlyOwner {
+        if (_poolV3 == address(0)) revert ZeroAddress();
+        poolV3 = _poolV3;
+    }
+
+    /**
+     * @notice Toggle between Aave V2 and V3 flash loan execution
+     * @dev AT-018: Feature flag for V3 migration with 44% fee savings (9 BPS -> 5 BPS)
+     * @param _useV3 True to use Aave V3, false to use Aave V2 (default)
+     */
+    function setUseAaveV3(bool _useV3) external onlyOwner {
+        if (_useV3 && poolV3 == address(0)) {
+            revert ZeroAddress(); // Must set poolV3 before enabling V3
+        }
+        useAaveV3 = _useV3;
+        address activePool = _useV3 ? poolV3 : lendingPool;
+        emit AaveVersionUpdated(_useV3, activePool);
+    }
+
     // params encoding helper (off-chain):
     // abi.encode(router1, router2, path1, path2, amountOutMin1, amountOutMin2, minProfitTokenUnits, unwrapProfitToEth, initiator, deadline)
 
-    // Start a single-asset flash loan via Aave V2 (assets/amounts arrays length == 1)
+    /**
+     * @notice Start a single-asset flash loan via Aave V2 or V3 (based on useAaveV3 flag)
+     * @dev AT-018: Branching logic for V2/V3 flash loan initiation
+     * @param asset The ERC20 token address to borrow
+     * @param amount The amount to borrow
+     * @param params ABI-encoded arbitrage parameters
+     */
     function startFlashLoan(address asset, uint256 amount, bytes calldata params) external onlyOwner whenNotPaused {
-        require(amount > 0, "amount-zero");
-        require(tokenWhitelist[asset], "asset-not-whitelisted");
+        if (amount == 0) revert ZeroAmount();
+        if (!tokenWhitelist[asset]) revert TokenNotWhitelisted(asset);
 
         address[] memory assets = new address[](1);
         assets[0] = asset;
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
-        uint256[] memory modes = new uint256[](1);
-        modes[0] = 0; // 0 = no debt (flash)
 
         emit FlashLoanRequested(msg.sender, asset, amount);
-        ILendingPool(lendingPool).flashLoan(address(this), assets, amounts, modes, address(this), params, 0);
+
+        if (useAaveV3) {
+            // Aave V3 flash loan: 5 BPS fee (0.05%)
+            uint256[] memory modes = new uint256[](1);
+            modes[0] = AAVE_V3_INTEREST_RATE_MODE_NONE; // 0 = no debt (flash only)
+            IPoolV3(poolV3).flashLoan(address(this), assets, amounts, modes, address(this), params, 0);
+        } else {
+            // Aave V2 flash loan: 9 BPS fee (0.09%)
+            uint256[] memory modes = new uint256[](1);
+            modes[0] = 0; // 0 = no debt (flash)
+            ILendingPool(lendingPool).flashLoan(address(this), assets, amounts, modes, address(this), params, 0);
+        }
     }
 
-    // Aave V2-style executeOperation
+    /**
+     * @notice Aave flash loan callback (compatible with V2 and V3)
+     * @dev AT-016: Using custom errors for gas optimization
+     * @dev Both V2 and V3 use identical callback signature (interface compatibility)
+     * @dev Fee difference: V2 charges 9 BPS, V3 charges 5 BPS (44% savings)
+     */
     function executeOperation(
         address[] calldata assets,
         uint256[] calldata amounts,
@@ -338,8 +394,14 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         address initiator,
         bytes calldata params
     ) external override nonReentrant whenNotPaused returns (bool) {
-        require(msg.sender == lendingPool, "only-lending-pool");
-        require(assets.length == 1 && amounts.length == 1 && premiums.length == 1, "only-single-asset-supported");
+        // Validate caller is authorized Aave pool (V2 or V3)
+        if (!(msg.sender == lendingPool || msg.sender == poolV3)) {
+            revert UnauthorizedCaller(msg.sender);
+        }
+
+        if (assets.length != 1 || amounts.length != 1 || premiums.length != 1) {
+            revert InvalidPathLength(assets.length);
+        }
 
         address _reserve = assets[0];
         uint256 _amount = amounts[0];
@@ -361,16 +423,21 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         // Security: Validate trusted initiator (single source of truth for access control)
         // Owner is automatically trusted via initialize(). Additional addresses can be
         // delegated via setTrustedInitiator() for bot/operator access.
-        require(trustedInitiators[opInitiator], "initiator-not-trusted");
+        if (!trustedInitiators[opInitiator]) {
+            revert InvalidInitiator(opInitiator);
+        }
 
         // Architectural: Invariant checks
-        require(routerWhitelist[router1] && routerWhitelist[router2], "router-not-allowed");
+        if (!routerWhitelist[router1]) revert RouterNotWhitelisted(router1);
+        if (!routerWhitelist[router2]) revert RouterNotWhitelisted(router2);
 
         // Security: Validate routers are contracts (prevent EOA routers)
-        require(_isContract(router1), "router1-must-be-contract");
-        require(_isContract(router2), "router2-must-be-contract");
+        if (!_isContract(router1)) revert RouterNotWhitelisted(router1);
+        if (!_isContract(router2)) revert RouterNotWhitelisted(router2);
 
-        require(path1.length >= 2 && path2.length >= 2, "invalid-paths");
+        if (path1.length < 2 || path2.length < 2) {
+            revert InvalidPathLength(path1.length < 2 ? path1.length : path2.length);
+        }
 
         // Security: Validate path lengths before expensive whitelist iteration (gas DOS prevention)
         if (path1.length > maxPathLength) {
@@ -380,19 +447,21 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
             revert PathTooLong(path2.length, maxPathLength);
         }
 
-        require(path1[0] == _reserve, "path1 must start with reserve");
-        require(path2[path2.length - 1] == _reserve, "path2 must end with reserve");
-        require(initiator == address(this), "initiator-must-be-contract");
+        if (path1[0] != _reserve) revert InvalidPathLength(0);
+        if (path2[path2.length - 1] != _reserve) revert InvalidPathLength(path2.length);
+        if (initiator != address(this)) revert InvalidInitiator(initiator);
 
         // MEV protection: Enforce max deadline
-        require(deadline >= block.timestamp && deadline <= block.timestamp + MAX_DEADLINE, "deadline-invalid");
+        if (deadline < block.timestamp || deadline > block.timestamp + MAX_DEADLINE) {
+            revert InvalidDeadline(deadline, block.timestamp, block.timestamp + MAX_DEADLINE);
+        }
 
         // Validate all tokens in paths are whitelisted
         for (uint256 i = 0; i < path1.length; i++) {
-            require(tokenWhitelist[path1[i]], "token1-not-whitelisted");
+            if (!tokenWhitelist[path1[i]]) revert TokenNotWhitelisted(path1[i]);
         }
         for (uint256 i = 0; i < path2.length; i++) {
-            require(tokenWhitelist[path2[i]], "token2-not-whitelisted");
+            if (!tokenWhitelist[path2[i]]) revert TokenNotWhitelisted(path2[i]);
         }
 
         // Token approval: If DEX adapter is configured, approve the adapter instead of the router.
@@ -445,11 +514,13 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         }
 
         address intermediate = path1[path1.length - 1];
-        require(path2[0] == intermediate, "path2 must start with intermediate token");
+        if (path2[0] != intermediate) revert InvalidPathLength(0);
 
         // Security: Balance validation after first swap
         uint256 balanceAfterFirstSwap = IERC20(intermediate).balanceOf(address(this));
-        require(balanceAfterFirstSwap >= out1, "balance-validation-failed");
+        if (balanceAfterFirstSwap < out1) {
+            revert SlippageExceeded(out1, balanceAfterFirstSwap, maxSlippageBps);
+        }
 
         // Token approval: If DEX adapter is configured, approve the adapter instead of the router.
         // The adapter will pull tokens from this contract, then approve and call the router.
@@ -505,13 +576,15 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
         uint256 finalBalance = IERC20(_reserve).balanceOf(address(this));
 
         // Architectural: Invariant check - must have enough to repay
-        require(finalBalance >= totalDebt, "insufficient-to-repay");
+        if (finalBalance < totalDebt) {
+            revert InsufficientProfit(finalBalance, totalDebt);
+        }
 
         uint256 profit = finalBalance - totalDebt;
 
         // Economic optimization: Use native math (already using - since Solidity 0.8.x)
-        if (minProfit > 0) {
-            require(profit >= minProfit, "profit-less-than-min");
+        if (minProfit > 0 && profit < minProfit) {
+            revert InsufficientProfit(profit, minProfit);
         }
 
         if (profit > 0) {
@@ -519,7 +592,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
             if (unwrapProfitToEth && _reserve == WETH) {
                 IWETH(WETH).withdraw(profit);
                 (bool sent, ) = owner().call{value: profit}("");
-                require(sent, "eth-transfer-failed");
+                if (!sent) revert("ETH transfer failed");
                 ethProfits += profit;
             } else {
                 // Transfer profit to owner immediately to maintain zero balance invariant
@@ -545,22 +618,22 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
     // Withdraw accumulated profit (pull pattern). If token == address(0) withdraw ETH profits.
     function withdrawProfit(address token, uint256 amount, address to) external onlyOwner nonReentrant {
-        require(amount > 0, "amount-zero");
-        require(to != address(0), "to-zero");
+        if (amount == 0) revert ZeroAmount();
+        if (to == address(0)) revert ZeroAddress();
 
         if (token == address(0)) {
             // ETH withdraw
-            require(amount <= ethProfits, "amount-exceeds-eth-profit");
+            if (amount > ethProfits) revert InsufficientProfit(ethProfits, amount);
             ethProfits -= amount;
             (bool sent, ) = to.call{value: amount}("");
-            require(sent, "eth-transfer-failed");
+            if (!sent) revert("ETH transfer failed");
             emit Withdrawn(address(0), to, amount);
             return;
         }
 
         // Architectural: Invariant check - ensure sufficient balance
         uint256 bal = profits[token];
-        require(amount <= bal, "amount-exceeds-profit");
+        if (amount > bal) revert InsufficientProfit(bal, amount);
 
         profits[token] -= amount;
         IERC20(token).safeTransfer(to, amount);
@@ -569,7 +642,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, Initializable, UUPSUpgradea
 
     // Emergency rescue for ERC20
     function emergencyWithdrawERC20(address token, uint256 amount, address to) external onlyOwner nonReentrant {
-        require(to != address(0), "to-zero");
+        if (to == address(0)) revert ZeroAddress();
         IERC20(token).safeTransfer(to, amount);
         emit EmergencyWithdrawn(token, to, amount);
     }

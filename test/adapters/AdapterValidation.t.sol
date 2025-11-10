@@ -14,6 +14,7 @@ import {
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockRouter} from "../../mocks/MockRouter.sol";
+import "../../src/errors/FlashArbErrors.sol";
 
 /**
  * @title AdapterValidation Test Suite
@@ -266,14 +267,14 @@ contract AdapterValidationTest is TestBase {
         vm.startPrank(owner);
 
         // This should fail because bytecode hash is not approved
-        vm.expectRevert("adapter-not-approved");
+        vm.expectRevert(abi.encodeWithSelector(AdapterNotApproved.selector, address(newAdapter)));
         flashArb.setDexAdapter(address(uniswapRouter), address(newAdapter));
 
         // Now approve the adapter address but not the bytecode hash
         flashArb.approveAdapter(address(newAdapter), true);
 
         // Should still fail due to bytecode hash not approved
-        vm.expectRevert("adapter-code-hash-not-approved");
+        vm.expectRevert(abi.encodeWithSelector(AdapterSecurityViolation.selector, address(newAdapter), "Adapter bytecode not approved"));
         flashArb.setDexAdapter(address(uniswapRouter), address(newAdapter));
 
         // Now approve bytecode hash
