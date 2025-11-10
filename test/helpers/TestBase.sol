@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import {Test} from "forge-std/Test.sol";
 import {FuzzBounds} from "./FuzzBounds.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title FlashArbTestBase
@@ -54,6 +55,7 @@ abstract contract FlashArbTestBase is Test {
 
     /**
      * @notice Calculate minimum output after slippage
+     * @dev SEC-104: Uses Math.mulDiv to prevent overflow in extreme fuzz scenarios
      * @dev Applies slippage tolerance: quote * (10000 - slippageBps) / 10000
      * @param quote The quoted output amount
      * @param slippageBps Slippage in basis points
@@ -61,7 +63,8 @@ abstract contract FlashArbTestBase is Test {
      */
     function _minOutAfterSlippage(uint256 quote, uint256 slippageBps) internal pure returns (uint256) {
         require(slippageBps <= FuzzBounds.MAX_SLIPPAGE_BPS, "Slippage too high");
-        return quote * (FuzzBounds.MAX_BPS - slippageBps) / FuzzBounds.MAX_BPS;
+        // Use Math.mulDiv for overflow-safe calculation
+        return Math.mulDiv(quote, FuzzBounds.MAX_BPS - slippageBps, FuzzBounds.MAX_BPS);
     }
 
     /**

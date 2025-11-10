@@ -36,6 +36,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
@@ -575,8 +576,9 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         // The user-specified amountOutMin2 already incorporates their slippage tolerance.
         // No additional on-chain check needed as it would create redundant validation.
 
-        // Calculate total debt with rounding safety buffer (+1 wei to handle any rounding down)
-        // This ensures Aave V3 auto-pull will always succeed even with extreme values
+        // Calculate total debt with overflow protection (SEC-104)
+        // Solidity 0.8+ provides automatic overflow checks
+        // No unchecked block used for financial calculations per security best practices
         uint256 totalDebt = _amount + _fee;
         uint256 finalBalance = IERC20(_reserve).balanceOf(address(this));
 
@@ -660,6 +662,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
     /**
      * @notice Calculate minimum acceptable output based on slippage tolerance
      * @dev Pure function for slippage calculation using basis points (BPS)
+     * @dev SEC-104: Uses Math.mulDiv to prevent overflow in extreme fuzz scenarios
      * @param _inputAmount The input amount for the swap
      * @param _maxSlippageBps Maximum allowed slippage in basis points (e.g., 200 = 2%)
      * @return Minimum acceptable output amount
@@ -667,13 +670,21 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
      * Formula: minOutput = inputAmount * (10000 - maxSlippageBps) / 10000
      * Example: 100 ETH input with 200 BPS (2%) -> 98 ETH minimum output
      *
-     * Note: Division rounds down, providing conservative (safer) minimum threshold
+     * Note: Math.mulDiv uses rounding down (Math.Rounding.Floor by default),
+     *       providing conservative (safer) minimum threshold
      */
     function _calculateMinOutput(uint256 _inputAmount, uint256 _maxSlippageBps) internal pure returns (uint256) {
+        // Input validation: Cap input amount to prevent unrealistic scenarios
+        // Maximum realistic trade: 1e30 tokens (1 trillion tokens with 18 decimals)
+        if (_inputAmount > 1e30) revert ZeroAmount(); // Reuse existing error for simplicity
+
+        // Validate slippage is within allowed range (already enforced by setMaxSlippage, but defense in depth)
+        if (_maxSlippageBps > 1000) revert InvalidSlippage(_maxSlippageBps);
+
         // BPS calculation: 10000 = 100%, so (10000 - slippageBps) gives the minimum percentage
-        // Division by 10000 converts back from BPS to actual amount
-        // Example: 100 * (10000 - 200) / 10000 = 100 * 9800 / 10000 = 98
-        return (_inputAmount * (10000 - _maxSlippageBps)) / 10000;
+        // Math.mulDiv prevents overflow: (_inputAmount * numerator) / denominator
+        // Example: 100 * 9800 / 10000 = 98
+        return Math.mulDiv(_inputAmount, 10000 - _maxSlippageBps, 10000);
     }
 
     /**
