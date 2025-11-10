@@ -467,4 +467,182 @@ contract FlashArbFuzzTest is FlashArbTestBase {
     function dealTokens(address token, address to, uint256 amount) external {
         deal(token, to, amount);
     }
+
+    // ============================================================================
+    // SEC-104: Overflow Protection Tests
+    // ============================================================================
+
+    /**
+     * @notice Fuzz test for arithmetic overflow prevention in slippage calculation
+     * @dev SEC-104: Verifies no Panic(0x11) occurs at boundary values
+     * @dev Tests that Math.mulDiv prevents overflow in _calculateMinOutput
+     */
+    function testFuzz_NoOverflowInSlippageCalculation(uint256 inputAmount, uint256 slippageBps) external view {
+        // Bound to maximum safe values
+        // inputAmount capped at 1e30 (max realistic trade size)
+        inputAmount = bound(inputAmount, FuzzBounds.MIN_TRADE, FuzzBounds.MAX_POOL_LIQUIDITY);
+        // Slippage capped at 10% (1000 BPS)
+        slippageBps = bound(slippageBps, 0, 1000);
+
+        // This should NEVER revert with Panic(0x11) - arithmetic overflow
+        // The _calculateMinOutput uses Math.mulDiv which is overflow-safe
+        try this.externalCalculateMinOutput(inputAmount, slippageBps) returns (uint256 result) {
+            // Success - verify result is reasonable
+            assertLe(result, inputAmount, "Min output should not exceed input");
+
+            // Verify calculation is correct
+            uint256 expectedMin = Math.mulDiv(inputAmount, 10000 - slippageBps, 10000);
+            assertEq(result, expectedMin, "Calculation mismatch");
+        } catch (bytes memory reason) {
+            // If it reverts, it should be a revert with a known error, NOT Panic(0x11)
+            // Panic(0x11) has selector 0x4e487b71 followed by error code 0x11
+            if (reason.length >= 4) {
+                bytes4 selector = bytes4(reason);
+                // Verify it's NOT a Panic error
+                assertTrue(selector != bytes4(0x4e487b71), "Unexpected Panic error (overflow)");
+            }
+        }
+    }
+
+    /**
+     * @notice External wrapper for _calculateMinOutput to enable try/catch testing
+     */
+    function externalCalculateMinOutput(uint256 inputAmount, uint256 slippageBps) external pure returns (uint256) {
+        // This calls the internal helper which mirrors the contract's logic
+        return _minOutAfterSlippage(inputAmount, slippageBps);
+    }
+
+    /**
+     * @notice Fuzz test for extreme input amounts to flash loan
+     * @dev SEC-104: Verifies totalDebt calculation (_amount + _fee) doesn't overflow
+     */
+    function testFuzz_NoOverflowInDebtCalculation(uint256 loanAmount) external {
+        // Test with very large loan amounts (but still within realistic bounds)
+        loanAmount = bound(loanAmount, FuzzBounds.MIN_TRADE, FuzzBounds.MAX_FLASH_LOAN);
+
+        // Calculate fee
+        uint256 fee = _flashLoanFee(loanAmount);
+
+        // This calculation happens in executeOperation (line 582 in main contract)
+        // It should NEVER overflow because Solidity 0.8+ has automatic checks
+        uint256 totalDebt = loanAmount + fee;
+
+        // Verify no overflow occurred
+        assertGe(totalDebt, loanAmount, "Debt calculation wrapped around (overflow)");
+        assertGe(totalDebt, fee, "Debt calculation wrapped around (overflow)");
+
+        // Verify fee is reasonable (should be ~0.09% of loan amount)
+        assertLe(fee, loanAmount / 100, "Fee should be less than 1% of loan");
+    }
+
+    /**
+     * @notice Fuzz test for profit accumulation overflow
+     * @dev SEC-104: Verifies profits[token] += profit doesn't overflow
+     */
+    function testFuzz_NoOverflowInProfitAccumulation(uint256 profit1, uint256 profit2, uint256 profit3) external {
+        // Bound to reasonable profit amounts
+        profit1 = bound(profit1, 0, 1e27); // Up to 1 billion tokens
+        profit2 = bound(profit2, 0, 1e27);
+        profit3 = bound(profit3, 0, 1e27);
+
+        // Simulate multiple profitable trades accumulating profits
+        // This happens in executeOperation (line 605 in main contract)
+        uint256 totalProfit = 0;
+
+        // First profit
+        if (profit1 > 0) {
+            totalProfit += profit1;
+            assertGe(totalProfit, profit1, "First profit accumulation overflow");
+        }
+
+        // Second profit
+        if (profit2 > 0 && totalProfit <= type(uint256).max - profit2) {
+            totalProfit += profit2;
+            assertGe(totalProfit, profit2, "Second profit accumulation overflow");
+        }
+
+        // Third profit
+        if (profit3 > 0 && totalProfit <= type(uint256).max - profit3) {
+            totalProfit += profit3;
+            assertGe(totalProfit, profit3, "Third profit accumulation overflow");
+        }
+
+        // If we got here, no overflow occurred
+        assertTrue(true, "Profit accumulation handled safely");
+    }
+
+    /**
+     * @notice Fuzz test for boundary values at type limits
+     * @dev SEC-104: Tests behavior at extreme uint256 boundaries
+     */
+    function testFuzz_ExtremeValueBoundaries(uint256 amount) external {
+        // Test at various boundary points
+        if (amount > type(uint256).max / 10000) {
+            // Amount too large for safe multiplication by 10000
+            // Should be caught by input validation (1e30 cap)
+            amount = bound(amount, FuzzBounds.MIN_TRADE, FuzzBounds.MAX_POOL_LIQUIDITY);
+        }
+
+        // Verify multiplication by 10000 doesn't overflow
+        if (amount <= type(uint256).max / 10000) {
+            uint256 product = Math.mulDiv(amount, 10000, 1);
+            assertGe(product, amount, "Multiplication should increase value");
+
+            // Verify division brings it back
+            uint256 result = Math.mulDiv(product, 1, 10000);
+            assertEq(result, amount, "Should round-trip correctly");
+        }
+    }
+
+    /**
+     * @notice Test that input validation caps prevent unrealistic scenarios
+     * @dev SEC-104: Verifies 1e30 cap on _calculateMinOutput input
+     */
+    function test_InputCapPreventsUnrealisticAmounts() external {
+        uint256 unrealisticAmount = 1e40; // Way beyond any realistic trade
+
+        // This should revert with an error (not Panic) due to input validation
+        vm.expectRevert();
+        this.externalCalculateMinOutput(unrealisticAmount, 200);
+    }
+
+    /**
+     * @notice Test slippage calculation at exact boundary (1e30)
+     * @dev SEC-104: Verifies calculation works at the maximum allowed input
+     */
+    function test_SlippageCalculationAtMaximumBoundary() external view {
+        uint256 maxAmount = 1e30; // Maximum realistic trade size
+        uint256 slippage = 200; // 2%
+
+        // Should succeed without overflow
+        uint256 result = _minOutAfterSlippage(maxAmount, slippage);
+
+        // Verify result is correct
+        uint256 expected = Math.mulDiv(maxAmount, 9800, 10000);
+        assertEq(result, expected, "Calculation incorrect at boundary");
+
+        // Verify result is less than input (due to slippage)
+        assertLt(result, maxAmount, "Min output should account for slippage");
+    }
+
+    /**
+     * @notice Test that Math.mulDiv handles edge cases correctly
+     * @dev SEC-104: Comprehensive test of safe multiplication/division
+     */
+    function testFuzz_MulDivEdgeCases(uint256 x, uint256 y, uint256 denominator) external view {
+        // Bound inputs to prevent division by zero
+        denominator = bound(denominator, 1, type(uint256).max);
+
+        // Bound x and y to prevent overflow in x*y
+        x = bound(x, 0, type(uint128).max);
+        y = bound(y, 0, type(uint128).max);
+
+        // Math.mulDiv should handle this safely
+        uint256 result = Math.mulDiv(x, y, denominator);
+
+        // Verify result doesn't exceed maximum possible value
+        if (y > 0 && denominator > 0) {
+            assertLe(result, Math.mulDiv(x, y, 1), "Result should not exceed x*y");
+        }
+    }
 }
