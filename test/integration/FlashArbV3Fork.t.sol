@@ -294,12 +294,12 @@ contract FlashArbV3ForkTest is FlashArbTestBase {
      */
     function testFork_ProfitCalculation_IncludesV3Fee() public pure {
         uint256 loanAmount = 1000 * 10**18;
-        uint256 premium = (loanAmount * 5) / 10000; // 0.5% -> 0.05%
+        uint256 premium = (loanAmount * 5) / 10000; // 5 BPS = 0.05%
 
         uint256 totalDebt = loanAmount + premium;
 
-        // Expected total debt: 1000 + 0.5 = 1000.5 tokens
-        assertEq(totalDebt, 1000.05 * 10**18, "Total debt should include 5 BPS premium");
+        // Expected total debt: 1000 + 0.5 = 1000.5 tokens (5 BPS)
+        assertEq(totalDebt, 1000500000000000000000, "Total debt should include 5 BPS premium");
 
         // For profitability: finalBalance >= totalDebt
         // Profit = finalBalance - totalDebt

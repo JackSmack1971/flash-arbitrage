@@ -107,7 +107,7 @@ contract FlashArbV3Test is FlashArbTestBase {
      * @notice Test: setPoolV3 reverts on zero address
      * @dev Security: Prevent misconfiguration
      */
-    function testFail_SetPoolV3_ZeroAddress() public {
+    function test_RevertWhen_SetPoolV3_ZeroAddress() public {
         // Should revert with ZeroAddress error
         vm.expectRevert(ZeroAddress.selector);
         arb.setPoolV3(address(0));
@@ -172,11 +172,12 @@ contract FlashArbV3Test is FlashArbTestBase {
      * @notice Test: Non-owner cannot set poolV3
      * @dev Access control validation
      */
-    function testFail_SetPoolV3_AsNonOwner() public {
+    function test_RevertWhen_SetPoolV3_AsNonOwner() public {
         // Arrange: Attacker attempts to set poolV3
         vm.prank(attacker);
 
-        // Should revert with Ownable: caller is not the owner
+        // Should revert with OwnableUnauthorizedAccount error
+        vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, attacker));
         arb.setPoolV3(AaveV3Constants.AAVE_V3_POOL_MAINNET);
     }
 
@@ -184,14 +185,15 @@ contract FlashArbV3Test is FlashArbTestBase {
      * @notice Test: Non-owner cannot toggle V3 flag
      * @dev Access control validation
      */
-    function testFail_SetUseAaveV3_AsNonOwner() public {
+    function test_RevertWhen_SetUseAaveV3_AsNonOwner() public {
         // Arrange: Setup poolV3 as owner
         arb.setPoolV3(AaveV3Constants.AAVE_V3_POOL_MAINNET);
 
         // Attacker attempts to enable V3
         vm.prank(attacker);
 
-        // Should revert with Ownable: caller is not the owner
+        // Should revert with OwnableUnauthorizedAccount error
+        vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, attacker));
         arb.setUseAaveV3(true);
     }
 

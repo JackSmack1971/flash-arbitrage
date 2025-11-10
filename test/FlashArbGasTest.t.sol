@@ -104,9 +104,9 @@ contract FlashArbGasTest is FlashArbTestBase {
     function testGasBaselineDeposits() external {
         uint256 loanAmount = 1000 * 10**18;
 
-        // Setup profitable arbitrage
-        router1.setExchangeRate(95 * 10**17);
-        router2.setExchangeRate(105 * 10**17);
+        // Setup profitable arbitrage (0.98 * 1.07 = 1.0486 > 1.0009)
+        router1.setExchangeRate(98 * 10**16); // 0.98
+        router2.setExchangeRate(107 * 10**16); // 1.07
 
         // Pool already seeded in setUp with massive liquidity
 
@@ -125,7 +125,7 @@ contract FlashArbGasTest is FlashArbTestBase {
             path2,
             90 * 10**17,
             1000 * 10**18,
-            1 * 10**18,
+            0, // minProfit = 0 for gas test
             false,
             owner,
             _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
@@ -158,9 +158,9 @@ contract FlashArbGasTest is FlashArbTestBase {
 
         uint256 loanAmount = 1000 * 10**18;
 
-        // Setup profitable arbitrage
-        router1.setExchangeRate(95 * 10**17);
-        router2.setExchangeRate(105 * 10**17);
+        // Setup profitable arbitrage (0.98 * 1.07 = 1.0486 > 1.0009)
+        router1.setExchangeRate(98 * 10**16); // 0.98
+        router2.setExchangeRate(107 * 10**16); // 1.07
 
         // Pool already seeded in setUp with massive liquidity
 
@@ -179,7 +179,7 @@ contract FlashArbGasTest is FlashArbTestBase {
             path2,
             90 * 10**17,
             1000 * 10**18,
-            1 * 10**18,
+            0, // minProfit = 0 for gas test
             false,
             owner,
             _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
