@@ -15,8 +15,16 @@ library FuzzBounds {
     /// @notice Maximum slippage tolerance (5%)
     uint256 internal constant MAX_SLIPPAGE_BPS = 500;
 
-    /// @notice Flash loan fee in BPS (0.09%)
-    uint256 internal constant FLASH_LOAN_FEE_BPS = 9;
+    /// @notice Flash loan fee in BPS for Aave V2 (0.09%)
+    /// @dev Aave V2 charges 9 BPS premium (governance-controlled, may change)
+    uint256 internal constant FLASH_LOAN_FEE_BPS_V2 = 9;
+
+    /// @notice Flash loan fee in BPS for Aave V3 (0.05%)
+    /// @dev Aave V3 charges 5 BPS premium (44% savings vs V2, governance-controlled)
+    uint256 internal constant FLASH_LOAN_FEE_BPS_V3 = 5;
+
+    /// @notice Default flash loan fee (using V2 for backward compatibility)
+    uint256 internal constant FLASH_LOAN_FEE_BPS = FLASH_LOAN_FEE_BPS_V2;
 
     // ============ Token Amount Bounds ============
 

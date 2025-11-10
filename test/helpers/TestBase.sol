@@ -13,13 +13,43 @@ abstract contract FlashArbTestBase is Test {
     // ============ Math Helpers ============
 
     /**
-     * @notice Calculate flash loan fee with ceiling division
+     * @notice Calculate flash loan fee with ceiling division (Aave V2 default)
      * @dev Uses ceiling division to avoid rounding down: (amount * fee + divisor - 1) / divisor
+     * @dev WARNING: This uses hardcoded V2 fee. For accurate tests, use _flashLoanFeeV2() or _flashLoanFeeV3()
      * @param amount The loan amount
      * @return fee The flash loan fee (rounded up)
      */
     function _flashLoanFee(uint256 amount) internal pure returns (uint256) {
         return (amount * FuzzBounds.FLASH_LOAN_FEE_BPS + FuzzBounds.MAX_BPS - 1) / FuzzBounds.MAX_BPS;
+    }
+
+    /**
+     * @notice Calculate flash loan fee for Aave V2 (9 BPS)
+     * @param amount The loan amount
+     * @return fee The flash loan fee for V2 (rounded up)
+     */
+    function _flashLoanFeeV2(uint256 amount) internal pure returns (uint256) {
+        return (amount * FuzzBounds.FLASH_LOAN_FEE_BPS_V2 + FuzzBounds.MAX_BPS - 1) / FuzzBounds.MAX_BPS;
+    }
+
+    /**
+     * @notice Calculate flash loan fee for Aave V3 (5 BPS)
+     * @param amount The loan amount
+     * @return fee The flash loan fee for V3 (rounded up)
+     */
+    function _flashLoanFeeV3(uint256 amount) internal pure returns (uint256) {
+        return (amount * FuzzBounds.FLASH_LOAN_FEE_BPS_V3 + FuzzBounds.MAX_BPS - 1) / FuzzBounds.MAX_BPS;
+    }
+
+    /**
+     * @notice Calculate flash loan fee with custom BPS
+     * @dev Use this when testing with MockLendingPool's configurable premium
+     * @param amount The loan amount
+     * @param feeBps Custom fee in basis points
+     * @return fee The flash loan fee (rounded up)
+     */
+    function _flashLoanFeeCustom(uint256 amount, uint256 feeBps) internal pure returns (uint256) {
+        return (amount * feeBps + FuzzBounds.MAX_BPS - 1) / FuzzBounds.MAX_BPS;
     }
 
     /**

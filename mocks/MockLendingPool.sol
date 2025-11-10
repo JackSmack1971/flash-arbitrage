@@ -15,6 +15,18 @@ interface IFlashLoanReceiver {
 
 contract MockLendingPool {
     mapping(address => uint256) public balances;
+    uint256 public premiumBps; // Flash loan premium in basis points (default: 9 BPS for Aave V2)
+
+    constructor() {
+        premiumBps = 9; // Default to Aave V2 premium (0.09%)
+    }
+
+    /// @notice Set flash loan premium (for testing V2/V3 behavior)
+    /// @param _premiumBps Premium in basis points (9 for V2, 5 for V3)
+    function setPremium(uint256 _premiumBps) external {
+        require(_premiumBps <= 1000, "premium too high"); // Max 10%
+        premiumBps = _premiumBps;
+    }
 
     function flashLoan(
         address receiverAddress,
@@ -30,7 +42,7 @@ contract MockLendingPool {
 
         address asset = assets[0];
         uint256 amount = amounts[0];
-        uint256 fee = amount * 9 / 10000; // 0.09% fee
+        uint256 fee = amount * premiumBps / 10000; // Configurable fee
 
         require(balances[asset] >= amount, "insufficient pool balance");
 
