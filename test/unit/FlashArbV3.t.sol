@@ -178,9 +178,8 @@ contract FlashArbV3Test is FlashArbTestBase {
         // Arrange: Attacker attempts to set poolV3
         vm.prank(attacker);
 
-        // Should revert with OwnableUnauthorizedAccount error (OZ v5 custom error)
-        // Error selector: 0x118cdaa7 = keccak256("OwnableUnauthorizedAccount(address)")
-        vm.expectRevert(abi.encodeWithSelector(0x118cdaa7, attacker));
+        // Should revert with Ownable error (OZ v4 string error)
+        vm.expectRevert("Ownable: caller is not the owner");
         arb.setPoolV3(AaveV3Constants.AAVE_V3_POOL_MAINNET);
     }
 
@@ -195,9 +194,8 @@ contract FlashArbV3Test is FlashArbTestBase {
         // Attacker attempts to enable V3
         vm.prank(attacker);
 
-        // Should revert with OwnableUnauthorizedAccount error (OZ v5 custom error)
-        // Error selector: 0x118cdaa7 = keccak256("OwnableUnauthorizedAccount(address)")
-        vm.expectRevert(abi.encodeWithSelector(0x118cdaa7, attacker));
+        // Should revert with Ownable error (OZ v4 string error)
+        vm.expectRevert("Ownable: caller is not the owner");
         arb.setUseAaveV3(true);
     }
 

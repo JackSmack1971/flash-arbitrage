@@ -622,9 +622,10 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         }
 
         // Security: Sweep any remaining dust to maintain zero balance invariant
-        address[] memory dustTokens = new address[](2);
-        dustTokens[0] = _reserve;
-        dustTokens[1] = intermediate;
+        // CRITICAL: Do NOT sweep reserve token as it's needed for flash loan repayment
+        // The lending pool will pull totalDebt from this contract after executeOperation returns
+        address[] memory dustTokens = new address[](1);
+        dustTokens[0] = intermediate;  // Only sweep intermediate token, NOT reserve
         _sweepDust(dustTokens);
 
         emit FlashLoanExecuted(opInitiator, _reserve, _amount, _fee, profit);
