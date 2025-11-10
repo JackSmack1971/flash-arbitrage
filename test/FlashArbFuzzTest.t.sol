@@ -105,17 +105,25 @@ contract FlashArbFuzzTest is FlashArbTestBase {
         rate1 = _boundExchangeRate(rate1);
         rate2 = _boundExchangeRate(rate2);
 
-        // Prevent overflow in intermediate calculations: amountOut1 must be <= 1e30 (MockERC20 mint limit)
+        // SEC-201: Prevent overflow in intermediate calculations: amountOut1 must be < 1e30 (MAX_POOL_LIQUIDITY)
         // amountOut1 = loanAmount * rate1 / 1e18
-        // For safety: loanAmount * rate1 <= 1e30 * 1e18 = 1e48
-        // With loanAmount <= 9e29 and rate1 <= 100e18: max product is 9e29 * 100e18 = 9e49 > 1e48 (OVERFLOW!)
-        // Solution: Cap loanAmount when rates are high
-        if (rate1 > 10e18) {
-            // If rate > 10x, cap loan to prevent mint overflow
-            loanAmount = bound(loanAmount, FuzzBounds.MIN_TRADE, 1e28); // Cap at 1e28 instead of 9e29
-        }
-        if (rate2 > 10e18) {
-            loanAmount = bound(loanAmount, FuzzBounds.MIN_TRADE, 1e28);
+        // amountOut2 = amountOut1 * rate2 / 1e18
+        // For safety: amountOut2 = loanAmount * rate1 * rate2 / 1e36 must be < 1e30
+        // Therefore: loanAmount < 1e30 * 1e36 / (rate1 * rate2) = 1e66 / (rate1 * rate2)
+
+        // Calculate safe maximum loan amount based on combined rate effect
+        // Use Math.mulDiv to prevent overflow in rate1 * rate2
+        uint256 combinedRateEffect = Math.mulDiv(rate1, rate2, 10**18); // This is rate1*rate2/1e18
+
+        // SEC-203: Cap loanAmount to prevent intermediate values exceeding MAX_POOL_LIQUIDITY
+        // Safe max = 1e30 * 1e18 / combinedRateEffect, with 10% safety margin
+        if (combinedRateEffect > 10**18) {
+            // If combined effect > 1x, we need to cap the loan amount
+            // maxSafe = (1e30 * 1e18 * 0.9) / combinedRateEffect
+            uint256 maxSafeLoan = Math.mulDiv(9e29, 10**18, combinedRateEffect); // 90% of theoretical max
+            if (loanAmount > maxSafeLoan) {
+                loanAmount = bound(loanAmount, FuzzBounds.MIN_TRADE, maxSafeLoan);
+            }
         }
 
         // Setup exchange rates
@@ -128,9 +136,10 @@ contract FlashArbFuzzTest is FlashArbTestBase {
         uint256 amountOut1 = Math.mulDiv(loanAmount, rate1, 10**18);
         uint256 amountOut2 = Math.mulDiv(amountOut1, rate2, 10**18);
 
-        // Skip test if intermediate amount would overflow mint limit
-        if (amountOut1 > 1e30 || amountOut2 > 1e30) {
-            return; // Skip this fuzz iteration
+        // SEC-203: Skip test if intermediate amounts would exceed slippage calculation limits
+        // Use conservative threshold (95% of MAX_POOL_LIQUIDITY) to account for precision
+        if (amountOut1 >= 95e28 || amountOut2 >= 95e28) {
+            return; // Skip this fuzz iteration - inputs create unrealistic scenario
         }
 
         uint256 expectedProfit = amountOut2 > totalDebt ? amountOut2 - totalDebt : 0;
@@ -412,18 +421,21 @@ contract FlashArbFuzzTest is FlashArbTestBase {
         uint256 amountOut1 = Math.mulDiv(loanAmount, rate1, 10**18);
         uint256 amountOut2 = Math.mulDiv(amountOut1, rate2, 10**18);
 
-        // Skip test if would overflow mint limit (1e30)
-        if (amountOut1 > 1e30 || amountOut2 > 1e30) {
-            return; // Skip this fuzz iteration
+        // SEC-203: Skip test if would exceed slippage calculation limits (MAX_POOL_LIQUIDITY)
+        // Use conservative threshold (95% of MAX_POOL_LIQUIDITY = 95e28) to prevent boundary issues
+        // This prevents _minOutAfterSlippage from reverting with "Input exceeds maximum cap"
+        if (amountOut1 >= 95e28 || amountOut2 >= 95e28) {
+            return; // Skip this fuzz iteration - inputs create unrealistic liquidity scenario
         }
 
         // Calculate if this will be profitable
         uint256 fee = _flashLoanFee(loanAmount);
         uint256 totalDebt = loanAmount + fee;
 
-        // Use very permissive slippage for edge case testing
-        uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500); // 5% slippage
-        uint256 minOut2 = _minOutAfterSlippage(amountOut2, 500); // 5% slippage
+        // SEC-201: Use safe slippage calculation with Math.mulDiv (via _minOutAfterSlippage helper)
+        // Very permissive slippage for edge case testing (5% = 500 BPS)
+        uint256 minOut1 = _minOutAfterSlippage(amountOut1, 500);
+        uint256 minOut2 = _minOutAfterSlippage(amountOut2, 500);
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
