@@ -259,11 +259,21 @@ contract FlashArbInvariantTest is FlashArbTestBase {
     function testInsufficientRepaymentReverts() external {
         uint256 loanAmount = 1000 * 10**18;
 
-        // Setup unprofitable arbitrage
-        router1.setExchangeRate(50 * 10**17);
-        router2.setExchangeRate(50 * 10**17);
+        // Setup arbitrage that passes slippage but fails repayment
+        // Use rates that will cause insufficient repayment (after fee)
+        // rate1 * rate2 < 1.0009 (to fail after fee)
+        // Example: 0.95 * 1.05 = 0.9975 < 1.0009 (insufficient to repay)
+        router1.setExchangeRate(95 * 10**16); // 0.95
+        router2.setExchangeRate(105 * 10**16); // 1.05
 
-        // Pool already seeded in setUp
+        // Calculate expected outputs
+        uint256 amountOut1 = (loanAmount * 95) / 100; // 950 tokens
+        uint256 amountOut2 = (amountOut1 * 105) / 100; // 997.5 tokens
+
+        // Fee = 1000 * 9 / 10000 = 0.9 tokens
+        // Total debt = 1000.9 tokens
+        // Final balance = 997.5 tokens
+        // 997.5 < 1000.9 → INSUFFICIENT REPAYMENT
 
         address[] memory path1 = new address[](2);
         path1[0] = address(tokenA);
@@ -273,21 +283,25 @@ contract FlashArbInvariantTest is FlashArbTestBase {
         path2[0] = address(tokenB);
         path2[1] = address(tokenA);
 
+        // Set minOut values that will pass (below expected outputs)
+        uint256 minOut1 = (amountOut1 * 95) / 100; // 902.5 tokens (passes)
+        uint256 minOut2 = (amountOut2 * 95) / 100; // 947.625 tokens (passes)
+
         bytes memory params = abi.encode(
             address(router1),
             address(router2),
             path1,
             path2,
-            40 * 10**17,
-            400 * 10**18,
-            1 * 10**18,
+            minOut1,
+            minOut2,
+            0, // No minimum profit requirement (to test repayment check only)
             false,
             owner,
             _deadlineFromNow(30) // 30 seconds (within MAX_DEADLINE)
         );
 
         vm.prank(owner);
-        vm.expectRevert(); // Repayment validation error - may not have data through flash loan callback
+        vm.expectRevert(); // Should revert due to insufficient repayment (InsufficientProfit error)
         arb.startFlashLoan(address(tokenA), loanAmount, params);
     }
 }

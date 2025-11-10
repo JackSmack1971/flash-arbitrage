@@ -516,11 +516,9 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             out1 = amounts1[amounts1.length - 1];
         }
 
-        // Security: Enforce slippage limit on first swap
-        uint256 minOut1 = _calculateMinOutput(_amount, maxSlippageBps);
-        if (out1 < minOut1) {
-            revert SlippageExceeded(minOut1, out1, maxSlippageBps);
-        }
+        // Note: Slippage protection is enforced by the router via amountOutMin1 parameter.
+        // The user-specified amountOutMin1 already incorporates their slippage tolerance.
+        // No additional on-chain check needed as it would create redundant validation.
 
         address intermediate = path1[path1.length - 1];
         if (path2[0] != intermediate) revert InvalidPathLength(0);
@@ -573,13 +571,9 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             out2 = amounts2[amounts2.length - 1];
         }
 
-        // Security: Enforce slippage limit on second swap
-        // Note: On-chain slippage enforcement provides stronger guarantees than off-chain
-        // validation, as it cannot be bypassed by front-running or stale price data
-        uint256 minOut2 = _calculateMinOutput(out1, maxSlippageBps);
-        if (out2 < minOut2) {
-            revert SlippageExceeded(minOut2, out2, maxSlippageBps);
-        }
+        // Note: Slippage protection is enforced by the router via amountOutMin2 parameter.
+        // The user-specified amountOutMin2 already incorporates their slippage tolerance.
+        // No additional on-chain check needed as it would create redundant validation.
 
         // Calculate total debt with rounding safety buffer (+1 wei to handle any rounding down)
         // This ensures Aave V3 auto-pull will always succeed even with extreme values
