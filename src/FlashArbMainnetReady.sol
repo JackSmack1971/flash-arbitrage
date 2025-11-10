@@ -393,7 +393,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         uint256[] calldata premiums,
         address initiator,
         bytes calldata params
-    ) external override nonReentrant whenNotPaused returns (bool) {
+    ) external override(IFlashLoanReceiver, IFlashLoanReceiverV3) nonReentrant whenNotPaused returns (bool) {
         // Validate caller is authorized Aave pool (V2 or V3)
         if (!(msg.sender == lendingPool || msg.sender == poolV3)) {
             revert UnauthorizedCaller(msg.sender);

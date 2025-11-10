@@ -5,11 +5,11 @@ import {Test} from "forge-std/Test.sol";
 import {FuzzBounds} from "./FuzzBounds.sol";
 
 /**
- * @title TestBase
- * @notice Base contract for all tests with common helpers
+ * @title FlashArbTestBase
+ * @notice Base contract for all FlashArb tests with common helpers
  * @dev Provides deadline helpers and time management for consistent test behavior
  */
-abstract contract TestBase is Test {
+abstract contract FlashArbTestBase is Test {
     // ============ Math Helpers ============
 
     /**

@@ -2,9 +2,11 @@
 pragma solidity ^0.8.21;
 
 import "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/contracts/constants/AaveV3Constants.sol";
-import "../helpers/TestBase.sol";
+import {FlashArbTestBase} from "../helpers/TestBase.sol";
+import {MockERC20} from "../../mocks/MockERC20.sol";
 
 /**
  * @title FlashArbV3ForkTest
@@ -30,7 +32,7 @@ import "../helpers/TestBase.sol";
  * =========
  * forge test --match-contract FlashArbV3Fork --fork-url $SEPOLIA_RPC_URL -vvv
  */
-contract FlashArbV3ForkTest is TestBase {
+contract FlashArbV3ForkTest is FlashArbTestBase {
     using AaveV3Constants for *;
 
     FlashArbMainnetReady public arb;
@@ -55,9 +57,38 @@ contract FlashArbV3ForkTest is TestBase {
         _setStableTime();
         owner = address(this);
 
-        // Deploy contract
-        arb = new FlashArbMainnetReady();
-        arb.initialize();
+        // Mock AAVE provider at expected address (for non-fork test runs)
+        address aaveProvider = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
+        address mockLendingPool = makeAddr("mockLendingPool");
+
+        // Deploy mock provider bytecode
+        vm.etch(aaveProvider, hex"00");
+        vm.mockCall(
+            aaveProvider,
+            abi.encodeWithSignature("getLendingPool()"),
+            abi.encode(mockLendingPool)
+        );
+
+        // Mock hardcoded mainnet addresses that initialize() tries to call
+        // Deploy mock ERC20s and etch their bytecode at the hardcoded addresses
+        MockERC20 mockWETH = new MockERC20("WETH", "WETH", 18);
+        MockERC20 mockDAI = new MockERC20("DAI", "DAI", 18);
+        MockERC20 mockUSDC = new MockERC20("USDC", "USDC", 6);
+        vm.etch(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, address(mockWETH).code); // WETH
+        vm.etch(0x6B175474E89094C44Da98b954EedeAC495271d0F, address(mockDAI).code); // DAI
+        vm.etch(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, address(mockUSDC).code); // USDC
+        vm.etch(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, address(mockWETH).code); // Uniswap Router
+        vm.etch(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F, address(mockWETH).code); // Sushiswap Router
+
+        // Deploy implementation
+        FlashArbMainnetReady implementation = new FlashArbMainnetReady();
+
+        // Deploy proxy with initialization
+        bytes memory initData = abi.encodeCall(FlashArbMainnetReady.initialize, ());
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
+
+        // Cast proxy to FlashArbMainnetReady
+        arb = FlashArbMainnetReady(payable(address(proxy)));
 
         // Configure V3 for Sepolia
         arb.setPoolV3(SEPOLIA_V3_POOL);

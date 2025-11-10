@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-import "../helpers/TestBase.sol";
+import {FlashArbTestBase} from "../helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter, IFlashArbLike} from "../../src/UniswapV2Adapter.sol";
@@ -22,7 +22,7 @@ import {MockRouter} from "../../mocks/MockRouter.sol";
  * 4. Edge cases: 0 BPS, max BPS (1000 = 10%), rounding errors
  * 5. Per-swap slippage validation (not just final output)
  */
-contract SlippageEnforcementTest is TestBase {
+contract SlippageEnforcementTest is FlashArbTestBase {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public adapter;
     MockERC20 public weth;

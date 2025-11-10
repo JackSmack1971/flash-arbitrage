@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import {TestBase} from "./helpers/TestBase.sol";
+import {FlashArbTestBase} from "./helpers/TestBase.sol";
 import {FuzzBounds} from "./helpers/FuzzBounds.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {FlashArbMainnetReady} from "../src/FlashArbMainnetReady.sol";
@@ -11,7 +11,7 @@ import {MockLendingPool} from "../mocks/MockLendingPool.sol";
 import {MockRouter} from "../mocks/MockRouter.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract FlashArbFuzzTest is TestBase {
+contract FlashArbFuzzTest is FlashArbTestBase {
     FlashArbMainnetReady arb;
     UniswapV2Adapter adapter;
     MockERC20 tokenA;
