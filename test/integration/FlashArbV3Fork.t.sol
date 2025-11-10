@@ -2,6 +2,7 @@
 pragma solidity ^0.8.21;
 
 import "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/contracts/constants/AaveV3Constants.sol";
 import {FlashArbTestBase} from "../helpers/TestBase.sol";
@@ -55,9 +56,15 @@ contract FlashArbV3ForkTest is FlashArbTestBase {
         _setStableTime();
         owner = address(this);
 
-        // Deploy contract
-        arb = new FlashArbMainnetReady();
-        arb.initialize();
+        // Deploy implementation
+        FlashArbMainnetReady implementation = new FlashArbMainnetReady();
+
+        // Deploy proxy with initialization
+        bytes memory initData = abi.encodeCall(FlashArbMainnetReady.initialize, ());
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
+
+        // Cast proxy to FlashArbMainnetReady
+        arb = FlashArbMainnetReady(payable(address(proxy)));
 
         // Configure V3 for Sepolia
         arb.setPoolV3(SEPOLIA_V3_POOL);
