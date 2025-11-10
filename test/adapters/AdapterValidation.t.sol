@@ -4,7 +4,7 @@ pragma solidity ^0.8.21;
 import {FlashArbTestBase} from "../helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
-import {UniswapV2Adapter, IFlashArbLike} from "../../src/UniswapV2Adapter.sol";
+import {UniswapV2Adapter, IFlashArbLike, RouterNotContract} from "../../src/UniswapV2Adapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockRouter} from "../../mocks/MockRouter.sol";
