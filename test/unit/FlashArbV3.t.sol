@@ -3,6 +3,7 @@ pragma solidity ^0.8.21;
 
 import "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/contracts/constants/AaveV3Constants.sol";
 import {FlashArbTestBase} from "../helpers/TestBase.sol";
@@ -29,6 +30,10 @@ import {MockERC20} from "../../mocks/MockERC20.sol";
  * - V2 functionality unaffected when V3 disabled
  * - V3 uses correct pool address and premium
  */
+
+// OpenZeppelin v5 custom errors for testing
+error OwnableUnauthorizedAccount(address account);
+
 contract FlashArbV3Test is FlashArbTestBase {
     using AaveV3Constants for *;
 
