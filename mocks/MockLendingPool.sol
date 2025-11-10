@@ -55,15 +55,13 @@ contract MockLendingPool {
 
         require(success, "executeOperation failed");
 
-        // Check repayment: pool should have received back principal + fee
-        // After sending `amount`, balance was (balances[asset] - amount)
-        // After repayment, balance should be (balances[asset] - amount) + (amount + fee) = balances[asset] + fee
+        // Pull repayment from receiver (amount + fee)
+        // This matches real Aave V2 behavior where the pool pulls tokens back
         uint256 totalDebt = amount + fee;
-        uint256 expectedBalance = balances[asset] + fee; // balances[asset] was already decremented
-        require(IERC20(asset).balanceOf(address(this)) >= expectedBalance, "repayment failed");
+        IERC20(asset).transferFrom(receiverAddress, address(this), totalDebt);
 
-        // Update pool balance to include the fee
-        balances[asset] += fee;
+        // Update pool balance to reflect the received fee (amount was already restored)
+        balances[asset] += amount + fee;
     }
 
     function deposit(address asset, uint256 amount) external {

@@ -9,9 +9,6 @@ import "../../src/contracts/constants/AaveV3Constants.sol";
 import {FlashArbTestBase} from "../helpers/TestBase.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 
-// OpenZeppelin v5 custom errors for testing
-error OwnableUnauthorizedAccount(address account);
-
 /**
  * @title FlashArbV3Test
  * @notice Unit tests for Aave V3 flash loan integration (AT-018)
@@ -181,8 +178,9 @@ contract FlashArbV3Test is FlashArbTestBase {
         // Arrange: Attacker attempts to set poolV3
         vm.prank(attacker);
 
-        // Should revert with OwnableUnauthorizedAccount error
-        vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, attacker));
+        // Should revert with OwnableUnauthorizedAccount error (OZ v5 custom error)
+        // Error selector: 0x118cdaa7 = keccak256("OwnableUnauthorizedAccount(address)")
+        vm.expectRevert(abi.encodeWithSelector(0x118cdaa7, attacker));
         arb.setPoolV3(AaveV3Constants.AAVE_V3_POOL_MAINNET);
     }
 
@@ -197,8 +195,9 @@ contract FlashArbV3Test is FlashArbTestBase {
         // Attacker attempts to enable V3
         vm.prank(attacker);
 
-        // Should revert with OwnableUnauthorizedAccount error
-        vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, attacker));
+        // Should revert with OwnableUnauthorizedAccount error (OZ v5 custom error)
+        // Error selector: 0x118cdaa7 = keccak256("OwnableUnauthorizedAccount(address)")
+        vm.expectRevert(abi.encodeWithSelector(0x118cdaa7, attacker));
         arb.setUseAaveV3(true);
     }
 
