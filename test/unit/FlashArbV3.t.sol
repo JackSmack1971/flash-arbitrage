@@ -9,6 +9,9 @@ import "../../src/contracts/constants/AaveV3Constants.sol";
 import {FlashArbTestBase} from "../helpers/TestBase.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 
+// OpenZeppelin v5 custom errors for testing
+error OwnableUnauthorizedAccount(address account);
+
 /**
  * @title FlashArbV3Test
  * @notice Unit tests for Aave V3 flash loan integration (AT-018)
@@ -30,9 +33,6 @@ import {MockERC20} from "../../mocks/MockERC20.sol";
  * - V2 functionality unaffected when V3 disabled
  * - V3 uses correct pool address and premium
  */
-
-// OpenZeppelin v5 custom errors for testing
-error OwnableUnauthorizedAccount(address account);
 
 contract FlashArbV3Test is FlashArbTestBase {
     using AaveV3Constants for *;
