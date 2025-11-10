@@ -4,7 +4,7 @@ pragma solidity ^0.8.21;
 import "forge-std/Test.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/contracts/constants/AaveV3Constants.sol";
-import "../helpers/TestBase.sol";
+import {FlashArbTestBase} from "../helpers/TestBase.sol";
 
 /**
  * @title FlashArbV3ForkTest
@@ -30,7 +30,7 @@ import "../helpers/TestBase.sol";
  * =========
  * forge test --match-contract FlashArbV3Fork --fork-url $SEPOLIA_RPC_URL -vvv
  */
-contract FlashArbV3ForkTest is TestBase {
+contract FlashArbV3ForkTest is FlashArbTestBase {
     using AaveV3Constants for *;
 
     FlashArbMainnetReady public arb;

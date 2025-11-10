@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-import "../helpers/TestBase.sol";
+import {FlashArbTestBase} from "../helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter, IFlashArbLike} from "../../src/UniswapV2Adapter.sol";
@@ -14,7 +14,7 @@ import "../../src/errors/FlashArbErrors.sol";
  * @notice End-to-end validation of security remediations
  * @dev Tests all fixes work together in realistic scenarios
  */
-contract SecurityIntegrationTest is TestBase {
+contract SecurityIntegrationTest is FlashArbTestBase {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public adapter;
     MockERC20 public weth;

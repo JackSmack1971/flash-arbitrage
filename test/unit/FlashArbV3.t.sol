@@ -4,7 +4,7 @@ pragma solidity ^0.8.21;
 import "forge-std/Test.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import "../../src/contracts/constants/AaveV3Constants.sol";
-import "../helpers/TestBase.sol";
+import {FlashArbTestBase} from "../helpers/TestBase.sol";
 
 /**
  * @title FlashArbV3Test
@@ -27,7 +27,7 @@ import "../helpers/TestBase.sol";
  * - V2 functionality unaffected when V3 disabled
  * - V3 uses correct pool address and premium
  */
-contract FlashArbV3Test is TestBase {
+contract FlashArbV3Test is FlashArbTestBase {
     using AaveV3Constants for *;
 
     FlashArbMainnetReady public arb;

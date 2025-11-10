@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-import "../helpers/TestBase.sol";
+import {FlashArbTestBase} from "../helpers/TestBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/FlashArbMainnetReady.sol";
 import {UniswapV2Adapter, IFlashArbLike} from "../../src/UniswapV2Adapter.sol";
@@ -22,7 +22,7 @@ import "../../src/errors/FlashArbErrors.sol";
  * 3. Adapter making arbitrary external calls
  * 4. Bytecode hash validation for adapter allowlist
  */
-contract AdapterValidationTest is TestBase {
+contract AdapterValidationTest is FlashArbTestBase {
     FlashArbMainnetReady public flashArb;
     UniswapV2Adapter public legitimateAdapter;
     MockERC20 public weth;
