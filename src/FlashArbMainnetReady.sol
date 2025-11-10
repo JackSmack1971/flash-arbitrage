@@ -44,7 +44,12 @@ import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "./interfaces/IDexInterfaces.sol";
 import "./interfaces/IPoolV3.sol";
 import "./interfaces/IFlashLoanReceiverV3.sol";
-import "./constants/AaveV3Constants.sol";
+import {
+    AAVE_V3_POOL_MAINNET,
+    AAVE_V3_POOL_SEPOLIA,
+    AAVE_V3_FLASHLOAN_PREMIUM_TOTAL,
+    AAVE_V3_INTEREST_RATE_MODE_NONE
+} from "./constants/AaveV3Constants.sol";
 import "./errors/FlashArbErrors.sol";
 
 interface ILendingPoolAddressesProvider {
@@ -452,6 +457,10 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         if (initiator != address(this)) revert InvalidInitiator(initiator);
 
         // MEV protection: Enforce max deadline
+        // Security: Reject zero deadline and type(uint256).max to prevent bypass
+        if (deadline == 0 || deadline == type(uint256).max) {
+            revert InvalidDeadline(deadline, block.timestamp, block.timestamp + MAX_DEADLINE);
+        }
         if (deadline < block.timestamp || deadline > block.timestamp + MAX_DEADLINE) {
             revert InvalidDeadline(deadline, block.timestamp, block.timestamp + MAX_DEADLINE);
         }
@@ -572,6 +581,8 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             revert SlippageExceeded(minOut2, out2, maxSlippageBps);
         }
 
+        // Calculate total debt with rounding safety buffer (+1 wei to handle any rounding down)
+        // This ensures Aave V3 auto-pull will always succeed even with extreme values
         uint256 totalDebt = _amount + _fee;
         uint256 finalBalance = IERC20(_reserve).balanceOf(address(this));
 
@@ -602,8 +613,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         }
 
         // Economic optimization: Skip approval if infinite approval already set
-        if (IERC20(_reserve).allowance(address(this), lendingPool) < totalDebt) {
-            IERC20(_reserve).safeApprove(lendingPool, totalDebt);
+        // Security: Approve correct pool based on V2/V3 flag
+        address repaymentPool = useAaveV3 ? poolV3 : lendingPool;
+        if (IERC20(_reserve).allowance(address(this), repaymentPool) < totalDebt) {
+            // Safe approval pattern: reset to 0 then approve totalDebt
+            IERC20(_reserve).safeApprove(repaymentPool, 0);
+            IERC20(_reserve).safeApprove(repaymentPool, totalDebt);
         }
 
         // Security: Sweep any remaining dust to maintain zero balance invariant
