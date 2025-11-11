@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.21;
+pragma solidity 0.8.21;
 
 /**
  * @title Flash Arbitrage Executor V2
@@ -624,7 +624,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             if (unwrapProfitToEth && _reserve == WETH) {
                 IWETH(WETH).withdraw(profit);
                 (bool sent, ) = owner().call{value: profit}("");
-                if (!sent) revert("ETH transfer failed");
+                if (!sent) revert ETHTransferFailed();
                 ethProfits += profit;
             } else {
                 // Transfer profit to owner immediately to maintain zero balance invariant
@@ -663,7 +663,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             if (amount > ethProfits) revert InsufficientProfit(ethProfits, amount);
             ethProfits -= amount;
             (bool sent, ) = to.call{value: amount}("");
-            if (!sent) revert("ETH transfer failed");
+            if (!sent) revert ETHTransferFailed();
             emit Withdrawn(address(0), to, amount);
             return;
         }
