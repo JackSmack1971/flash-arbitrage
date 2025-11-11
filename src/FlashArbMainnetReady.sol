@@ -815,7 +815,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
     function _isContract(address account) internal view returns (bool) {
         // Check if account has code deployed
         uint256 size;
-        assembly {
+        assembly ("memory-safe") {
             size := extcodesize(account)
         }
         return size > 0;
