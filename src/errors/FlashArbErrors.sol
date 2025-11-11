@@ -97,3 +97,9 @@ error UnauthorizedCaller(address caller);
  * @param initiator The initiator address that failed validation
  */
 error InvalidInitiator(address initiator);
+
+/**
+ * @notice Thrown when ETH transfer to recipient fails
+ * @dev Indicates low-level call failure when sending ETH (e.g., recipient reverted)
+ */
+error ETHTransferFailed();

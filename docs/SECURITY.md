@@ -684,6 +684,303 @@ Before production deployment, verify the following security measures:
 4. 24/7 monitoring and incident response procedures
 5. Insurance coverage for high-value deployments
 
+## Security Assumptions
+
+### Phase 1: Sepolia Testnet / Low TVL (<$100K)
+
+**Deployment Approval**: APPROVED (per SCSA.md audit findings)
+
+**Security Model**:
+- **Single Owner Key**: Acceptable for testnet and mainnet TVL <$100K
+- **Owner Key Protection**: MANDATORY hardware wallet (Ledger Nano X, Trezor Model T, or GridPlus Lattice1)
+- **Access Control**: OpenZeppelin Ownable pattern with ReentrancyGuard on all privileged functions
+- **Delegation Model**: trustedInitiators mapping allows bot execution without full ownership transfer
+- **Emergency Response**: Owner can pause contract and emergency withdraw funds
+
+**Acceptable Risks**:
+- Single owner key compromise (mitigated by hardware wallet + limited TVL)
+- No timelock delay on administrative changes
+- Manual router/token whitelist management
+
+**Migration Requirements**:
+- **MANDATORY**: Multi-signature ownership transfer BEFORE TVL exceeds $100K (see Phase 2)
+- **MANDATORY**: Documented emergency procedures and key backup procedures
+- **RECOMMENDED**: Monitoring infrastructure operational before mainnet deployment
+
+### Phase 2: Mainnet Medium TVL ($100K - $1M)
+
+**Deployment Approval**: CONDITIONAL (REQUIRES multi-sig implementation)
+
+**Security Model**:
+- **Multi-Signature Ownership**: MANDATORY (2-of-3 or 3-of-5 Gnosis Safe)
+- **Key Distribution**: Geographic and organizational distribution of signer keys
+- **Operational Procedures**: Documented multi-sig operational workflows
+- **Monitoring**: 24/7 event monitoring with alerting (Tenderly, OpenZeppelin Defender)
+- **Bug Bounty**: Active program on Immunefi or Code4rena
+
+**Enhanced Requirements**:
+- Multi-sig MUST approve all setRouterWhitelist, setDexAdapter, and approveAdapter operations
+- Emergency pause capability accessible to any signer (1-of-N)
+- Documented incident response procedures with assigned roles
+- Quarterly security reviews
+
+**Migration Requirements**:
+- **MANDATORY**: TimelockController deployment BEFORE TVL exceeds $1M (see Phase 3)
+- **RECOMMENDED**: External security audit refresh
+- **RECOMMENDED**: Insurance coverage evaluation (Nexus Mutual, InsurAce)
+
+### Phase 3: High TVL (>$1M)
+
+**Deployment Approval**: REQUIRES additional controls
+
+**Security Model**:
+- **Multi-Signature + Timelock**: MANDATORY (24-48 hour delay on critical operations)
+- **External Audits**: Quarterly audits by reputable firms (Trail of Bits, OpenZeppelin, Consensys Diligence)
+- **Formal Verification**: Critical functions verified with Certora or Halmos
+- **Insurance**: Protocol insurance coverage MANDATORY
+- **Governance**: Consider DAO governance transition for long-term decentralization
+
+**Critical Requirements**:
+- TimelockController with 24-48 hour minimum delay
+- Separate emergency pause role (bypasses timelock)
+- Real-time on-chain monitoring with automated circuit breakers
+- Dedicated security operations team with 24/7 on-call rotation
+- Public bug bounty program with competitive rewards
+
+## Phased Deployment Security Requirements
+
+### Overview
+
+The flash arbitrage protocol follows a phased deployment strategy with escalating security controls as TVL increases. Each phase has specific security gates that MUST be met before progression.
+
+**Source**: SCSA.md Security Audit (Finding M-002: Single Owner Key Risk)
+
+### Phase 1: Sepolia Testnet (APPROVED)
+
+**Duration**: 7-14 days minimum
+**TVL Limit**: N/A (testnet ETH)
+**Status**: All [S] security levels compliant
+
+**Requirements Met**:
+- OpenZeppelin security primitives (Ownable, ReentrancyGuard, Pausable)
+- UUPS upgradeable architecture with proper initialization
+- Comprehensive test coverage (95%+ line coverage)
+- All static analysis tools passing (Slither, Semgrep)
+- Invariant testing validates system properties
+- Flash loan repayment validation
+- Reentrancy protection on all privileged functions
+
+**Acceptable Risks**:
+- Single owner key (hardware wallet required)
+- No timelock on administrative changes
+- Manual opportunity execution (no automated bot)
+
+**Success Criteria**:
+- 7+ days testnet operation with zero critical incidents
+- All test scenarios validated (profitable, unprofitable, reverted trades)
+- Emergency procedures tested (pause, emergency withdraw)
+- Monitoring infrastructure operational
+
+### Phase 2: Mainnet <$100K TVL (CONDITIONAL APPROVAL)
+
+**Duration**: 30+ days minimum
+**TVL Limit**: <$100K USD equivalent
+**Status**: REQUIRES multi-signature implementation
+
+**MANDATORY Prerequisites**:
+
+1. **Multi-Signature Ownership Transfer** (CRITICAL - Finding M-002)
+   - Deploy Gnosis Safe 2-of-3 or 3-of-5 multi-sig
+   - Transfer contract ownership from EOA to multi-sig address
+   - Test all owner functions through multi-sig (setRouterWhitelist, setDexAdapter, etc.)
+   - Document signer key management procedures
+   - Geographic/organizational distribution of signers
+
+2. **Custom Error Migration** (RECOMMENDED - Finding M-001)
+   - Complete AT-016 custom error migration
+   - Achieve 10% bytecode size reduction
+   - Save ~$25 deployment costs and 5% runtime gas
+
+3. **Emergency Pause Testing**
+   - Validate pause/unpause functionality via multi-sig
+   - Test emergency withdrawal procedures
+   - Document incident response workflows
+
+4. **Monitoring Infrastructure**
+   - Deploy event monitoring (Tenderly, OpenZeppelin Defender)
+   - Configure alerts for security-critical events
+   - Set up 24/7 notification channels
+
+5. **Bug Bounty Program**
+   - Launch program on Immunefi or Code4rena
+   - Define severity classifications and reward tiers
+   - Establish responsible disclosure procedures
+
+**Success Criteria**:
+- 30+ days mainnet operation with zero critical incidents
+- Multi-sig governance operational
+- All privileged operations executed via multi-sig
+- Monitoring alerts functioning correctly
+- No high/critical findings in security reviews
+
+### Phase 3: Mainnet >$100K TVL (BLOCKED PENDING ADDITIONAL CONTROLS)
+
+**Duration**: Ongoing
+**TVL Limit**: No limit with proper controls
+**Status**: REQUIRES timelock + external audit
+
+**MANDATORY Prerequisites**:
+
+1. **TimelockController Integration** (CRITICAL - Finding M-002 Full Resolution)
+   - Deploy OpenZeppelin TimelockController with 24-48 hour minimum delay
+   - Configure multi-sig as both proposer and executor
+   - Transfer ownership from multi-sig to timelock
+   - Implement emergency role (bypasses timelock for pause operations)
+   - Test timelock workflows on testnet
+
+   **Implementation**:
+   ```solidity
+   TimelockController timelock = new TimelockController(
+       48 hours,        // Minimum delay
+       [safeAddress],   // Proposers (multi-sig)
+       [safeAddress],   // Executors (multi-sig)
+       address(0)       // Admin (renounced)
+   );
+
+   flashArb.transferOwnership(address(timelock));
+   ```
+
+2. **External Security Audit** (MANDATORY)
+   - Professional audit by reputable firm (OpenZeppelin, Trail of Bits, Consensys Diligence)
+   - All critical/high findings MUST be resolved
+   - Medium findings mitigated or accepted with documentation
+   - Audit report published publicly
+
+3. **Bug Bounty Enhancement**
+   - Increase reward tiers for high TVL
+   - Promote program visibility
+   - Regular engagement with security community
+
+4. **Advanced Monitoring**
+   - Real-time on-chain monitoring
+   - Automated anomaly detection
+   - Circuit breaker integration (optional)
+   - 24/7 operations team with defined escalation procedures
+
+5. **Insurance Coverage** (RECOMMENDED)
+   - Protocol insurance via Nexus Mutual, InsurAce, or similar
+   - Coverage minimum: 25% of TVL
+   - Annual renewal and coverage review
+
+**Success Criteria**:
+- External audit completed with all findings remediated
+- Timelock operational with 48-hour delay
+- 60+ days Phase 2 operation with zero incidents
+- Insurance coverage active
+- Formal verification of critical functions (optional but recommended)
+
+## Multi-Signature Ownership Requirements (M-002)
+
+**Finding Reference**: SCSA.md Medium Finding M-002 - Single Owner Key Risk
+**Severity**: MEDIUM (acceptable for Phase 1, UNACCEPTABLE for Phase 2+)
+**Historical Context**: $953.2M lost to access control violations in 2024
+
+### Attack Vector
+
+Compromised owner private key grants attacker ability to:
+- Whitelist malicious routers/adapters → drain contract funds
+- Upgrade to malicious implementation → steal all deposited assets
+- Modify trusted initiators → execute unauthorized arbitrage with stolen capital
+- Bypass all security controls via owner privileges
+
+### Remediation: Multi-Signature Setup
+
+**Phase 2 Requirement** (BEFORE TVL exceeds $100K):
+
+**Step 1: Deploy Gnosis Safe**
+```bash
+# Use Gnosis Safe UI: https://app.safe.global/
+# OR deploy via script
+
+# Recommended configurations:
+# - 2-of-3 for small teams
+# - 3-of-5 for larger organizations
+# - Consider geographic distribution of signers
+```
+
+**Step 2: Transfer Ownership**
+```solidity
+// After Safe deployment and validation
+address safeAddress = 0x...; // Gnosis Safe address
+
+// Verify Safe configuration
+require(IGnosisSafe(safeAddress).getThreshold() >= 2, "Must be multi-sig");
+require(IGnosisSafe(safeAddress).getOwners().length >= 3, "Need 3+ signers");
+
+// Transfer ownership
+flashArb.transferOwnership(safeAddress);
+```
+
+**Step 3: Test Multi-Sig Operations**
+```bash
+# Test all critical functions via Safe UI:
+forge test --fork-url $MAINNET_RPC_URL --match-test testMultiSig
+
+# Validate:
+# - setRouterWhitelist() via multi-sig
+# - setDexAdapter() via multi-sig
+# - approveAdapter() via multi-sig
+# - Emergency pause via multi-sig
+# - emergencyWithdrawERC20() via multi-sig
+```
+
+**Step 4: Document Operational Procedures**
+- Signer key backup procedures
+- Multi-sig proposal/approval workflow
+- Emergency response procedures
+- Signer rotation policies
+- Geographic/organizational distribution
+
+### Timelock Requirements (Phase 3)
+
+**Phase 3 Requirement** (BEFORE TVL exceeds $1M):
+
+**Implementation**:
+```solidity
+// Deploy TimelockController
+TimelockController timelock = new TimelockController(
+    48 hours,                    // Min delay (24-48h recommended)
+    [address(multiSig)],         // Proposers: Multi-sig
+    [address(multiSig)],         // Executors: Multi-sig
+    address(0)                   // Admin: Renounced
+);
+
+// Set up emergency role (bypasses delay for pause)
+bytes32 EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
+timelock.grantRole(EMERGENCY_ROLE, address(multiSig));
+
+// Transfer ownership to timelock
+flashArb.transferOwnership(address(timelock));
+```
+
+**Timelock Operations**:
+- All administrative changes (setRouterWhitelist, setDexAdapter, etc.) require 48-hour delay
+- Community has 48-hour window to react to malicious proposals
+- Emergency pause bypasses timelock (direct multi-sig execution)
+- Timelock provides transparency and accountability
+
+**Timelock Testing**:
+```bash
+# Test timelock workflows
+forge test --fork-url $SEPOLIA_RPC_URL --match-test testTimelock
+
+# Validate:
+# 1. Schedule operation (multi-sig proposes)
+# 2. Wait minimum delay (48 hours)
+# 3. Execute operation (multi-sig executes)
+# 4. Emergency pause (immediate execution)
+```
+
 ## Contact
 
 For security concerns or vulnerability reports, please contact the development team.
