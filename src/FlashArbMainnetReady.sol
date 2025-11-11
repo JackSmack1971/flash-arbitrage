@@ -89,6 +89,37 @@ interface IWETH is IERC20 {
 contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
 
+    // --- Structs for stack depth optimization ---
+
+    /**
+     * @notice Arbitrage parameters struct to reduce stack depth
+     * @dev Groups all arbitrage-related parameters into a single struct
+     */
+    struct ArbitrageParams {
+        address router1;
+        address router2;
+        address[] path1;
+        address[] path2;
+        uint256 amountOutMin1;
+        uint256 amountOutMin2;
+        uint256 minProfit;
+        bool unwrapProfitToEth;
+        address opInitiator;
+        uint256 deadline;
+    }
+
+    /**
+     * @notice Swap execution context to reduce stack depth
+     * @dev Holds intermediate swap results and calculations
+     */
+    struct SwapContext {
+        uint256 out1;
+        uint256 out2;
+        address intermediate;
+        uint256 totalDebt;
+        uint256 profit;
+    }
+
     // --- Hardcoded common mainnet addresses (verify before use) ---
     address public constant AAVE_PROVIDER = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
     address public constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
@@ -411,6 +442,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
      * @dev AT-016: Using custom errors for gas optimization
      * @dev Both V2 and V3 use identical callback signature (interface compatibility)
      * @dev Fee difference: V2 charges 9 BPS, V3 charges 5 BPS (44% savings)
+     * @dev Refactored to use structs and helper functions to avoid stack-too-deep errors
      */
     function executeOperation(
         address[] calldata assets,
@@ -432,6 +464,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         uint256 _amount = amounts[0];
         uint256 _fee = premiums[0];
 
+        // Decode parameters into struct to reduce stack depth
         (
             address router1,
             address router2,
@@ -445,212 +478,257 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             uint256 deadline
         ) = abi.decode(params, (address, address, address[], address[], uint256, uint256, uint256, bool, address, uint256));
 
-        // Security: Validate trusted initiator (single source of truth for access control)
-        // Owner is automatically trusted via initialize(). Additional addresses can be
-        // delegated via setTrustedInitiator() for bot/operator access.
-        if (!trustedInitiators[opInitiator]) {
-            revert InvalidInitiator(opInitiator);
+        ArbitrageParams memory arbParams = ArbitrageParams({
+            router1: router1,
+            router2: router2,
+            path1: path1,
+            path2: path2,
+            amountOutMin1: amountOutMin1,
+            amountOutMin2: amountOutMin2,
+            minProfit: minProfit,
+            unwrapProfitToEth: unwrapProfitToEth,
+            opInitiator: opInitiator,
+            deadline: deadline
+        });
+
+        // Validate arbitrage parameters
+        _validateArbitrageParams(arbParams, _reserve, initiator);
+
+        // Execute swaps and calculate profit
+        SwapContext memory ctx = _executeSwaps(arbParams, _reserve, _amount);
+
+        // Handle profit distribution
+        ctx.totalDebt = _amount + _fee;
+        ctx.profit = _handleProfitDistribution(_reserve, ctx.totalDebt, arbParams.minProfit, arbParams.unwrapProfitToEth);
+
+        // Approve repayment and sweep dust
+        _finalizeOperation(_reserve, ctx.totalDebt, ctx.intermediate);
+
+        emit FlashLoanExecuted(arbParams.opInitiator, _reserve, _amount, _fee, ctx.profit);
+        return true;
+    }
+
+    /**
+     * @notice Validate arbitrage parameters
+     * @dev Internal helper to reduce stack depth in executeOperation
+     */
+    function _validateArbitrageParams(
+        ArbitrageParams memory arbParams,
+        address _reserve,
+        address initiator
+    ) internal view {
+        // Security: Validate trusted initiator
+        if (!trustedInitiators[arbParams.opInitiator]) {
+            revert InvalidInitiator(arbParams.opInitiator);
         }
 
-        // Architectural: Invariant checks
-        if (!routerWhitelist[router1]) revert RouterNotWhitelisted(router1);
-        if (!routerWhitelist[router2]) revert RouterNotWhitelisted(router2);
+        // Validate routers
+        if (!routerWhitelist[arbParams.router1]) revert RouterNotWhitelisted(arbParams.router1);
+        if (!routerWhitelist[arbParams.router2]) revert RouterNotWhitelisted(arbParams.router2);
 
-        // Security: Validate routers are contracts (prevent EOA routers)
-        if (!_isContract(router1)) revert RouterNotWhitelisted(router1);
-        if (!_isContract(router2)) revert RouterNotWhitelisted(router2);
+        // Security: Validate routers are contracts
+        if (!_isContract(arbParams.router1)) revert RouterNotWhitelisted(arbParams.router1);
+        if (!_isContract(arbParams.router2)) revert RouterNotWhitelisted(arbParams.router2);
 
-        if (path1.length < 2 || path2.length < 2) {
-            revert InvalidPathLength(path1.length < 2 ? path1.length : path2.length);
+        // Validate path lengths
+        if (arbParams.path1.length < 2 || arbParams.path2.length < 2) {
+            revert InvalidPathLength(arbParams.path1.length < 2 ? arbParams.path1.length : arbParams.path2.length);
         }
 
-        // Security: Validate path lengths before expensive whitelist iteration (gas DOS prevention)
-        if (path1.length > maxPathLength) {
-            revert PathTooLong(path1.length, maxPathLength);
+        if (arbParams.path1.length > maxPathLength) {
+            revert PathTooLong(arbParams.path1.length, maxPathLength);
         }
-        if (path2.length > maxPathLength) {
-            revert PathTooLong(path2.length, maxPathLength);
+        if (arbParams.path2.length > maxPathLength) {
+            revert PathTooLong(arbParams.path2.length, maxPathLength);
         }
 
-        if (path1[0] != _reserve) revert InvalidPathLength(0);
-        if (path2[path2.length - 1] != _reserve) revert InvalidPathLength(path2.length);
+        // Validate paths
+        if (arbParams.path1[0] != _reserve) revert InvalidPathLength(0);
+        if (arbParams.path2[arbParams.path2.length - 1] != _reserve) revert InvalidPathLength(arbParams.path2.length);
         if (initiator != address(this)) revert InvalidInitiator(initiator);
 
         // MEV protection: Enforce max deadline
-        // Security: Reject zero deadline and type(uint256).max to prevent bypass
-        if (deadline == 0 || deadline == type(uint256).max) {
-            revert InvalidDeadline(deadline, block.timestamp, block.timestamp + MAX_DEADLINE);
+        if (arbParams.deadline == 0 || arbParams.deadline == type(uint256).max) {
+            revert InvalidDeadline(arbParams.deadline, block.timestamp, block.timestamp + MAX_DEADLINE);
         }
-        if (deadline < block.timestamp || deadline > block.timestamp + MAX_DEADLINE) {
-            revert InvalidDeadline(deadline, block.timestamp, block.timestamp + MAX_DEADLINE);
+        if (arbParams.deadline < block.timestamp || arbParams.deadline > block.timestamp + MAX_DEADLINE) {
+            revert InvalidDeadline(arbParams.deadline, block.timestamp, block.timestamp + MAX_DEADLINE);
         }
 
         // Validate all tokens in paths are whitelisted
-        for (uint256 i = 0; i < path1.length; i++) {
-            if (!tokenWhitelist[path1[i]]) revert TokenNotWhitelisted(path1[i]);
+        for (uint256 i = 0; i < arbParams.path1.length; i++) {
+            if (!tokenWhitelist[arbParams.path1[i]]) revert TokenNotWhitelisted(arbParams.path1[i]);
         }
-        for (uint256 i = 0; i < path2.length; i++) {
-            if (!tokenWhitelist[path2[i]]) revert TokenNotWhitelisted(path2[i]);
+        for (uint256 i = 0; i < arbParams.path2.length; i++) {
+            if (!tokenWhitelist[arbParams.path2[i]]) revert TokenNotWhitelisted(arbParams.path2[i]);
         }
+    }
 
-        // Token approval: If DEX adapter is configured, approve the adapter instead of the router.
-        // The adapter will pull tokens from this contract, then approve and call the router.
-        // This pattern enables dynamic allowance handling for arbitrarily large flash loans.
-        uint256 out1;
-        if (address(dexAdapters[router1]) != address(0)) {
-            address adapter1 = address(dexAdapters[router1]);
+    /**
+     * @notice Execute both swaps and return context
+     * @dev Internal helper to reduce stack depth in executeOperation
+     */
+    function _executeSwaps(
+        ArbitrageParams memory arbParams,
+        address _reserve,
+        uint256 _amount
+    ) internal returns (SwapContext memory ctx) {
+        // Execute first swap
+        ctx.out1 = _executeSwap(
+            arbParams.router1,
+            _reserve,
+            _amount,
+            arbParams.amountOutMin1,
+            arbParams.path1,
+            arbParams.deadline
+        );
 
-            // Approve adapter if current allowance is insufficient
-            if (IERC20(_reserve).allowance(address(this), adapter1) < _amount) {
-                // Safe approval pattern: reset to 0 then approve required amount
-                IERC20(_reserve).safeApprove(adapter1, 0);
-                IERC20(_reserve).safeApprove(adapter1, _amount);
-            }
-
-            // Security: Validate adapter is still approved before calling
-            // Enhanced security: Verify adapter is a contract
-            if (!_isContract(adapter1)) {
-                revert AdapterSecurityViolation(adapter1, "Adapter must be a contract");
-            }
-
-            // Security: Validate adapter address is approved
-            if (!approvedAdapters[adapter1]) {
-                revert AdapterSecurityViolation(adapter1, "Adapter not approved");
-            }
-
-            // Security: Validate adapter bytecode hash is approved (prevents code substitution)
-            if (!approvedAdapterCodeHashes[adapter1.codehash]) {
-                revert AdapterSecurityViolation(adapter1, "Adapter bytecode not approved");
-            }
-
-            out1 = dexAdapters[router1].swap(router1, _amount, amountOutMin1, path1, address(this), deadline, maxAllowance);
-        } else {
-            // No adapter: approve router directly
-            if (IERC20(_reserve).allowance(address(this), router1) < _amount) {
-                // Safe approval pattern: reset to 0 then approve required amount
-                IERC20(_reserve).safeApprove(router1, 0);
-                IERC20(_reserve).safeApprove(router1, _amount);
-            }
-
-            uint256[] memory amounts1 = IUniswapV2Router02(router1).swapExactTokensForTokens(_amount, amountOutMin1, path1, address(this), deadline);
-            out1 = amounts1[amounts1.length - 1];
-        }
-
-        // SEC-202: Explicit slippage validation using on-chain maxSlippageBps
-        // Calculate minimum acceptable output based on input amount and slippage tolerance
+        // Validate slippage for first swap
         uint256 minAcceptableOut1 = _calculateMinOutput(_amount, maxSlippageBps);
-        if (out1 < minAcceptableOut1) {
-            revert SlippageExceeded(minAcceptableOut1, out1, maxSlippageBps);
+        if (ctx.out1 < minAcceptableOut1) {
+            revert SlippageExceeded(minAcceptableOut1, ctx.out1, maxSlippageBps);
         }
 
-        address intermediate = path1[path1.length - 1];
-        if (path2[0] != intermediate) revert InvalidPathLength(0);
+        // Get intermediate token and validate
+        ctx.intermediate = arbParams.path1[arbParams.path1.length - 1];
+        if (arbParams.path2[0] != ctx.intermediate) revert InvalidPathLength(0);
 
-        // Security: Balance validation after first swap
-        uint256 balanceAfterFirstSwap = IERC20(intermediate).balanceOf(address(this));
-        if (balanceAfterFirstSwap < out1) {
-            revert SlippageExceeded(out1, balanceAfterFirstSwap, maxSlippageBps);
+        // Validate balance after first swap
+        uint256 balanceAfterFirstSwap = IERC20(ctx.intermediate).balanceOf(address(this));
+        if (balanceAfterFirstSwap < ctx.out1) {
+            revert SlippageExceeded(ctx.out1, balanceAfterFirstSwap, maxSlippageBps);
         }
 
-        // Token approval: If DEX adapter is configured, approve the adapter instead of the router.
-        // The adapter will pull tokens from this contract, then approve and call the router.
-        uint256 out2;
-        if (address(dexAdapters[router2]) != address(0)) {
-            address adapter2 = address(dexAdapters[router2]);
+        // Execute second swap
+        ctx.out2 = _executeSwap(
+            arbParams.router2,
+            ctx.intermediate,
+            ctx.out1,
+            arbParams.amountOutMin2,
+            arbParams.path2,
+            arbParams.deadline
+        );
 
-            // Approve adapter if current allowance is insufficient
-            if (IERC20(intermediate).allowance(address(this), adapter2) < out1) {
-                // Safe approval pattern: reset to 0 then approve required amount
-                IERC20(intermediate).safeApprove(adapter2, 0);
-                IERC20(intermediate).safeApprove(adapter2, out1);
+        // Validate slippage for second swap
+        uint256 minAcceptableOut2 = _calculateMinOutput(ctx.out1, maxSlippageBps);
+        if (ctx.out2 < minAcceptableOut2) {
+            revert SlippageExceeded(minAcceptableOut2, ctx.out2, maxSlippageBps);
+        }
+
+        return ctx;
+    }
+
+    /**
+     * @notice Execute a single swap with adapter or router
+     * @dev Internal helper to reduce code duplication and stack depth
+     */
+    function _executeSwap(
+        address router,
+        address tokenIn,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] memory path,
+        uint256 deadline
+    ) internal returns (uint256) {
+        if (address(dexAdapters[router]) != address(0)) {
+            address adapter = address(dexAdapters[router]);
+
+            // Approve adapter if needed
+            if (IERC20(tokenIn).allowance(address(this), adapter) < amountIn) {
+                IERC20(tokenIn).safeApprove(adapter, 0);
+                IERC20(tokenIn).safeApprove(adapter, amountIn);
             }
 
-            // Security: Validate adapter is still approved before calling
-            // Enhanced security: Verify adapter is a contract
-            if (!_isContract(adapter2)) {
-                revert AdapterSecurityViolation(adapter2, "Adapter must be a contract");
+            // Validate adapter security
+            if (!_isContract(adapter)) {
+                revert AdapterSecurityViolation(adapter, "Adapter must be a contract");
+            }
+            if (!approvedAdapters[adapter]) {
+                revert AdapterSecurityViolation(adapter, "Adapter not approved");
+            }
+            if (!approvedAdapterCodeHashes[adapter.codehash]) {
+                revert AdapterSecurityViolation(adapter, "Adapter bytecode not approved");
             }
 
-            // Security: Validate adapter address is approved
-            if (!approvedAdapters[adapter2]) {
-                revert AdapterSecurityViolation(adapter2, "Adapter not approved");
-            }
-
-            // Security: Validate adapter bytecode hash is approved (prevents code substitution)
-            if (!approvedAdapterCodeHashes[adapter2.codehash]) {
-                revert AdapterSecurityViolation(adapter2, "Adapter bytecode not approved");
-            }
-
-            out2 = dexAdapters[router2].swap(router2, out1, amountOutMin2, path2, address(this), deadline, maxAllowance);
+            return dexAdapters[router].swap(router, amountIn, amountOutMin, path, address(this), deadline, maxAllowance);
         } else {
-            // No adapter: approve router directly
-            if (IERC20(intermediate).allowance(address(this), router2) < out1) {
-                // Safe approval pattern: reset to 0 then approve required amount
-                IERC20(intermediate).safeApprove(router2, 0);
-                IERC20(intermediate).safeApprove(router2, out1);
+            // No adapter: use router directly
+            if (IERC20(tokenIn).allowance(address(this), router) < amountIn) {
+                IERC20(tokenIn).safeApprove(router, 0);
+                IERC20(tokenIn).safeApprove(router, amountIn);
             }
 
-            uint256[] memory amounts2 = IUniswapV2Router02(router2).swapExactTokensForTokens(out1, amountOutMin2, path2, address(this), deadline);
-            out2 = amounts2[amounts2.length - 1];
+            uint256[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
+                amountIn,
+                amountOutMin,
+                path,
+                address(this),
+                deadline
+            );
+            return amounts[amounts.length - 1];
         }
+    }
 
-        // SEC-202: Explicit slippage validation for second swap using on-chain maxSlippageBps
-        // Calculate minimum acceptable output based on intermediate amount and slippage tolerance
-        uint256 minAcceptableOut2 = _calculateMinOutput(out1, maxSlippageBps);
-        if (out2 < minAcceptableOut2) {
-            revert SlippageExceeded(minAcceptableOut2, out2, maxSlippageBps);
-        }
-
-        // Calculate total debt with overflow protection (SEC-104)
-        // Solidity 0.8+ provides automatic overflow checks
-        // No unchecked block used for financial calculations per security best practices
-        uint256 totalDebt = _amount + _fee;
+    /**
+     * @notice Handle profit distribution (transfer or unwrap)
+     * @dev Internal helper to reduce stack depth in executeOperation
+     * @return profit The calculated profit amount
+     */
+    function _handleProfitDistribution(
+        address _reserve,
+        uint256 totalDebt,
+        uint256 minProfit,
+        bool unwrapProfitToEth
+    ) internal returns (uint256 profit) {
         uint256 finalBalance = IERC20(_reserve).balanceOf(address(this));
 
-        // Architectural: Invariant check - must have enough to repay
+        // Validate sufficient balance for repayment
         if (finalBalance < totalDebt) {
             revert InsufficientProfit(finalBalance, totalDebt);
         }
 
-        uint256 profit = finalBalance - totalDebt;
+        profit = finalBalance - totalDebt;
 
-        // Economic optimization: Use native math (already using - since Solidity 0.8.x)
+        // Validate minimum profit
         if (minProfit > 0 && profit < minProfit) {
             revert InsufficientProfit(profit, minProfit);
         }
 
         if (profit > 0) {
-            // If unwrap requested and profit token is WETH, unwrap to ETH and transfer to owner
             if (unwrapProfitToEth && _reserve == WETH) {
                 IWETH(WETH).withdraw(profit);
                 (bool sent, ) = owner().call{value: profit}("");
                 if (!sent) revert ETHTransferFailed();
                 ethProfits += profit;
             } else {
-                // Transfer profit to owner immediately to maintain zero balance invariant
                 IERC20(_reserve).safeTransfer(owner(), profit);
                 profits[_reserve] += profit;
             }
         }
 
-        // Economic optimization: Skip approval if infinite approval already set
-        // Security: Approve correct pool based on V2/V3 flag
+        return profit;
+    }
+
+    /**
+     * @notice Finalize operation with repayment approval and dust sweep
+     * @dev Internal helper to reduce stack depth in executeOperation
+     */
+    function _finalizeOperation(
+        address _reserve,
+        uint256 totalDebt,
+        address intermediate
+    ) internal {
+        // Approve repayment pool
         address repaymentPool = useAaveV3 ? poolV3 : lendingPool;
         if (IERC20(_reserve).allowance(address(this), repaymentPool) < totalDebt) {
-            // Safe approval pattern: reset to 0 then approve totalDebt
             IERC20(_reserve).safeApprove(repaymentPool, 0);
             IERC20(_reserve).safeApprove(repaymentPool, totalDebt);
         }
 
-        // Security: Sweep any remaining dust to maintain zero balance invariant
-        // CRITICAL: Do NOT sweep reserve token as it's needed for flash loan repayment
-        // The lending pool will pull totalDebt from this contract after executeOperation returns
+        // Sweep dust (only intermediate token, NOT reserve)
         address[] memory dustTokens = new address[](1);
-        dustTokens[0] = intermediate;  // Only sweep intermediate token, NOT reserve
+        dustTokens[0] = intermediate;
         _sweepDust(dustTokens);
-
-        emit FlashLoanExecuted(opInitiator, _reserve, _amount, _fee, profit);
-        return true;
     }
 
     // Withdraw accumulated profit (pull pattern). If token == address(0) withdraw ETH profits.
