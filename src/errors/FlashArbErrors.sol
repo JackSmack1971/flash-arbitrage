@@ -103,3 +103,10 @@ error InvalidInitiator(address initiator);
  * @dev Indicates low-level call failure when sending ETH (e.g., recipient reverted)
  */
 error ETHTransferFailed();
+
+/**
+ * @notice Thrown when owner attempts to remove themselves as trusted initiator
+ * @dev AUDIT FINDING M-2: Prevents contract execution brick by ensuring owner always trusted
+ * @param owner The owner address that attempted self-removal
+ */
+error CannotRemoveOwnerAsInitiator(address owner);
