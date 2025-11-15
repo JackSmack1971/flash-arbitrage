@@ -260,7 +260,8 @@ contract GasPriceSpikeTest is Test {
             uint256 gasCost = _calculateGasCost(prices[i]);
             uint256 usdCost = _gasCostToUSD(gasCost);
 
-            console.log(prices[i], "gwei =>", gasCost, "wei (", usdCost, "USD)");
+            console.log(prices[i], "gwei =>", gasCost, "wei");
+            console.log("  USD Cost:", usdCost);
         }
 
         console.log("\n=== OPERATIONAL GUIDANCE ===");
