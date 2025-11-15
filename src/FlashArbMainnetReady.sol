@@ -540,6 +540,16 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
     }
 
     /**
+     * @notice Validate all tokens in a path are whitelisted
+     * @dev Extracted helper to reduce stack depth
+     */
+    function _validatePathTokens(address[] memory path) internal view {
+        for (uint256 i = 0; i < path.length; i++) {
+            if (!tokenWhitelist[path[i]]) revert TokenNotWhitelisted(path[i]);
+        }
+    }
+
+    /**
      * @notice Validate arbitrage parameters
      * @dev Internal helper to reduce stack depth in executeOperation
      */
@@ -586,13 +596,9 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             revert InvalidDeadline(arbParams.deadline, block.timestamp, block.timestamp + MAX_DEADLINE);
         }
 
-        // Validate all tokens in paths are whitelisted
-        for (uint256 i = 0; i < arbParams.path1.length; i++) {
-            if (!tokenWhitelist[arbParams.path1[i]]) revert TokenNotWhitelisted(arbParams.path1[i]);
-        }
-        for (uint256 i = 0; i < arbParams.path2.length; i++) {
-            if (!tokenWhitelist[arbParams.path2[i]]) revert TokenNotWhitelisted(arbParams.path2[i]);
-        }
+        // Validate all tokens in paths are whitelisted (extracted to reduce stack)
+        _validatePathTokens(arbParams.path1);
+        _validatePathTokens(arbParams.path2);
     }
 
     /**
@@ -656,6 +662,23 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
     }
 
     /**
+     * @notice Validate adapter security (bytecode and approval status)
+     * @dev Extracted helper to reduce stack depth in _executeSwap
+     */
+    function _validateAdapter(address adapter) internal view {
+        if (!_isContract(adapter)) {
+            revert AdapterSecurityViolation(adapter, "Adapter must be a contract");
+        }
+        if (!approvedAdapters[adapter]) {
+            revert AdapterSecurityViolation(adapter, "Adapter not approved");
+        }
+        bytes32 codeHash = adapter.codehash;
+        if (!approvedAdapterCodeHashes[codeHash]) {
+            revert AdapterSecurityViolation(adapter, "Adapter bytecode not approved");
+        }
+    }
+
+    /**
      * @notice Execute a single swap with adapter or router
      * @dev Internal helper to reduce code duplication and stack depth
      */
@@ -670,25 +693,15 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         IDexAdapter adapter = dexAdapters[router];
 
         if (address(adapter) != address(0)) {
+            // Validate adapter security (extracted to reduce stack)
+            _validateAdapter(address(adapter));
+
             // Approve adapter if needed (scoped to minimize stack)
             {
                 uint256 currentAllowance = IERC20(tokenIn).allowance(address(this), address(adapter));
                 if (currentAllowance < amountIn) {
                     IERC20(tokenIn).forceApprove(address(adapter), amountIn);
                 }
-            }
-
-            // Validate adapter security
-            if (!_isContract(address(adapter))) {
-                revert AdapterSecurityViolation(address(adapter), "Adapter must be a contract");
-            }
-            if (!approvedAdapters[address(adapter)]) {
-                revert AdapterSecurityViolation(address(adapter), "Adapter not approved");
-            }
-
-            bytes32 codeHash = address(adapter).codehash;
-            if (!approvedAdapterCodeHashes[codeHash]) {
-                revert AdapterSecurityViolation(address(adapter), "Adapter bytecode not approved");
             }
 
             return adapter.swap(router, amountIn, amountOutMin, path, address(this), deadline, maxAllowance);
