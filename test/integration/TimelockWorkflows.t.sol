@@ -286,7 +286,7 @@ contract TimelockWorkflowsTest is Test {
         assertFalse(arb.paused(), "Contract should not be paused initially");
 
         // Prepare pause() call
-        bytes memory data = abi.encodeWithSelector(FlashArbMainnetReady.pause.selector);
+        bytes memory data = abi.encodeWithSignature("pause()");
 
         bytes32 salt = keccak256("emergency-pause");
         bytes32 predecessor = bytes32(0);
