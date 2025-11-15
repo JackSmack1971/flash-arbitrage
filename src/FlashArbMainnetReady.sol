@@ -128,7 +128,6 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         uint256 out1;
         uint256 out2;
         address intermediate;
-        uint256 totalDebt;
         uint256 profit;
     }
 
@@ -502,52 +501,41 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             revert InvalidPathLength(assets.length);
         }
 
+        // Stack optimization: Use minimal local variables
         address _reserve = assets[0];
         uint256 _amount = amounts[0];
-        uint256 _fee = premiums[0];
 
-        // Decode parameters into struct to reduce stack depth
-        // L-3 REMEDIATION: Renamed opInitiator → botOperator for clarity
-        (
-            address router1,
-            address router2,
-            address[] memory path1,
-            address[] memory path2,
-            uint256 amountOutMin1,
-            uint256 amountOutMin2,
-            uint256 minProfit,
-            bool unwrapProfitToEth,
-            address botOperator, // L-3: Off-chain bot/operator address (must be in trustedInitiators mapping)
-            uint256 deadline
-        ) = abi.decode(params, (address, address, address[], address[], uint256, uint256, uint256, bool, address, uint256));
-
-        ArbitrageParams memory arbParams = ArbitrageParams({
-            router1: router1,
-            router2: router2,
-            path1: path1,
-            path2: path2,
-            amountOutMin1: amountOutMin1,
-            amountOutMin2: amountOutMin2,
-            minProfit: minProfit,
-            unwrapProfitToEth: unwrapProfitToEth,
-            botOperator: botOperator, // L-3: Renamed from opInitiator
-            deadline: deadline
-        });
+        // Decode directly into memory struct to minimize stack usage
+        ArbitrageParams memory arbParams;
+        {
+            // Scoped block to immediately release decoded variables
+            (
+                arbParams.router1,
+                arbParams.router2,
+                arbParams.path1,
+                arbParams.path2,
+                arbParams.amountOutMin1,
+                arbParams.amountOutMin2,
+                arbParams.minProfit,
+                arbParams.unwrapProfitToEth,
+                arbParams.botOperator,
+                arbParams.deadline
+            ) = abi.decode(params, (address, address, address[], address[], uint256, uint256, uint256, bool, address, uint256));
+        }
 
         // Validate arbitrage parameters
         _validateArbitrageParams(arbParams, _reserve, initiator);
 
-        // Execute swaps and calculate profit
+        // Execute swaps and calculate profit - pass fee directly to avoid extra variable
         SwapContext memory ctx = _executeSwaps(arbParams, _reserve, _amount);
 
-        // Handle profit distribution
-        ctx.totalDebt = _amount + _fee;
-        ctx.profit = _handleProfitDistribution(_reserve, ctx.totalDebt, arbParams.minProfit, arbParams.unwrapProfitToEth);
+        // Handle profit distribution with calculated total debt
+        ctx.profit = _handleProfitDistribution(_reserve, _amount + premiums[0], arbParams.minProfit, arbParams.unwrapProfitToEth);
 
         // Approve repayment and sweep dust
-        _finalizeOperation(_reserve, ctx.totalDebt, ctx.intermediate);
+        _finalizeOperation(_reserve, _amount + premiums[0], ctx.intermediate);
 
-        emit FlashLoanExecuted(arbParams.botOperator, _reserve, _amount, _fee, ctx.profit);
+        emit FlashLoanExecuted(arbParams.botOperator, _reserve, _amount, premiums[0], ctx.profit);
         return true;
     }
 
@@ -616,7 +604,7 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         address _reserve,
         uint256 _amount
     ) internal returns (SwapContext memory ctx) {
-        // Execute first swap
+        // Execute first swap and validate slippage
         ctx.out1 = _executeSwap(
             arbParams.router1,
             _reserve,
@@ -626,23 +614,27 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             arbParams.deadline
         );
 
-        // Validate slippage for first swap
-        uint256 minAcceptableOut1 = _calculateMinOutput(_amount, maxSlippageBps);
-        if (ctx.out1 < minAcceptableOut1) {
-            revert SlippageExceeded(minAcceptableOut1, ctx.out1, maxSlippageBps);
+        // Validate slippage for first swap (scoped to release variable immediately)
+        {
+            uint256 minOut = _calculateMinOutput(_amount, maxSlippageBps);
+            if (ctx.out1 < minOut) {
+                revert SlippageExceeded(minOut, ctx.out1, maxSlippageBps);
+            }
         }
 
         // Get intermediate token and validate
         ctx.intermediate = arbParams.path1[arbParams.path1.length - 1];
         if (arbParams.path2[0] != ctx.intermediate) revert InvalidPathLength(0);
 
-        // Validate balance after first swap
-        uint256 balanceAfterFirstSwap = IERC20(ctx.intermediate).balanceOf(address(this));
-        if (balanceAfterFirstSwap < ctx.out1) {
-            revert SlippageExceeded(ctx.out1, balanceAfterFirstSwap, maxSlippageBps);
+        // Validate balance after first swap (scoped)
+        {
+            uint256 bal = IERC20(ctx.intermediate).balanceOf(address(this));
+            if (bal < ctx.out1) {
+                revert SlippageExceeded(ctx.out1, bal, maxSlippageBps);
+            }
         }
 
-        // Execute second swap
+        // Execute second swap and validate slippage
         ctx.out2 = _executeSwap(
             arbParams.router2,
             ctx.intermediate,
@@ -652,10 +644,12 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
             arbParams.deadline
         );
 
-        // Validate slippage for second swap
-        uint256 minAcceptableOut2 = _calculateMinOutput(ctx.out1, maxSlippageBps);
-        if (ctx.out2 < minAcceptableOut2) {
-            revert SlippageExceeded(minAcceptableOut2, ctx.out2, maxSlippageBps);
+        // Validate slippage for second swap (scoped)
+        {
+            uint256 minOut = _calculateMinOutput(ctx.out1, maxSlippageBps);
+            if (ctx.out2 < minOut) {
+                revert SlippageExceeded(minOut, ctx.out2, maxSlippageBps);
+            }
         }
 
         return ctx;
@@ -673,30 +667,38 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         address[] memory path,
         uint256 deadline
     ) internal returns (uint256) {
-        if (address(dexAdapters[router]) != address(0)) {
-            address adapter = address(dexAdapters[router]);
+        IDexAdapter adapter = dexAdapters[router];
 
-            // M-3 REMEDIATION: Approve adapter if needed using forceApprove for non-standard token compatibility
-            if (IERC20(tokenIn).allowance(address(this), adapter) < amountIn) {
-                IERC20(tokenIn).forceApprove(adapter, amountIn);
+        if (address(adapter) != address(0)) {
+            // Approve adapter if needed (scoped to minimize stack)
+            {
+                uint256 currentAllowance = IERC20(tokenIn).allowance(address(this), address(adapter));
+                if (currentAllowance < amountIn) {
+                    IERC20(tokenIn).forceApprove(address(adapter), amountIn);
+                }
             }
 
             // Validate adapter security
-            if (!_isContract(adapter)) {
-                revert AdapterSecurityViolation(adapter, "Adapter must be a contract");
+            if (!_isContract(address(adapter))) {
+                revert AdapterSecurityViolation(address(adapter), "Adapter must be a contract");
             }
-            if (!approvedAdapters[adapter]) {
-                revert AdapterSecurityViolation(adapter, "Adapter not approved");
-            }
-            if (!approvedAdapterCodeHashes[adapter.codehash]) {
-                revert AdapterSecurityViolation(adapter, "Adapter bytecode not approved");
+            if (!approvedAdapters[address(adapter)]) {
+                revert AdapterSecurityViolation(address(adapter), "Adapter not approved");
             }
 
-            return dexAdapters[router].swap(router, amountIn, amountOutMin, path, address(this), deadline, maxAllowance);
+            bytes32 codeHash = address(adapter).codehash;
+            if (!approvedAdapterCodeHashes[codeHash]) {
+                revert AdapterSecurityViolation(address(adapter), "Adapter bytecode not approved");
+            }
+
+            return adapter.swap(router, amountIn, amountOutMin, path, address(this), deadline, maxAllowance);
         } else {
-            // M-3 REMEDIATION: No adapter - use router directly with forceApprove
-            if (IERC20(tokenIn).allowance(address(this), router) < amountIn) {
-                IERC20(tokenIn).forceApprove(router, amountIn);
+            // No adapter - use router directly (scoped for stack optimization)
+            {
+                uint256 currentAllowance = IERC20(tokenIn).allowance(address(this), router);
+                if (currentAllowance < amountIn) {
+                    IERC20(tokenIn).forceApprove(router, amountIn);
+                }
             }
 
             uint256[] memory amounts = IUniswapV2Router02(router).swapExactTokensForTokens(
@@ -721,20 +723,24 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         uint256 minProfit,
         bool unwrapProfitToEth
     ) internal returns (uint256 profit) {
-        uint256 finalBalance = IERC20(_reserve).balanceOf(address(this));
+        // Calculate profit in scoped block to minimize stack
+        {
+            uint256 bal = IERC20(_reserve).balanceOf(address(this));
 
-        // Validate sufficient balance for repayment
-        if (finalBalance < totalDebt) {
-            revert InsufficientProfit(finalBalance, totalDebt);
+            // Validate sufficient balance for repayment
+            if (bal < totalDebt) {
+                revert InsufficientProfit(bal, totalDebt);
+            }
+
+            profit = bal - totalDebt;
+
+            // Validate minimum profit
+            if (minProfit > 0 && profit < minProfit) {
+                revert InsufficientProfit(profit, minProfit);
+            }
         }
 
-        profit = finalBalance - totalDebt;
-
-        // Validate minimum profit
-        if (minProfit > 0 && profit < minProfit) {
-            revert InsufficientProfit(profit, minProfit);
-        }
-
+        // Distribute profit if any
         if (profit > 0) {
             if (unwrapProfitToEth && _reserve == WETH) {
                 IWETH(WETH).withdraw(profit);
@@ -759,10 +765,13 @@ contract FlashArbMainnetReady is IFlashLoanReceiver, IFlashLoanReceiverV3, Initi
         uint256 totalDebt,
         address intermediate
     ) internal {
-        // M-3 REMEDIATION: Approve repayment pool using forceApprove for non-standard token compatibility
-        address repaymentPool = useAaveV3 ? poolV3 : lendingPool;
-        if (IERC20(_reserve).allowance(address(this), repaymentPool) < totalDebt) {
-            IERC20(_reserve).forceApprove(repaymentPool, totalDebt);
+        // Approve repayment pool in scoped block (stack optimization)
+        {
+            address pool = useAaveV3 ? poolV3 : lendingPool;
+            uint256 currentAllowance = IERC20(_reserve).allowance(address(this), pool);
+            if (currentAllowance < totalDebt) {
+                IERC20(_reserve).forceApprove(pool, totalDebt);
+            }
         }
 
         // Sweep dust (only intermediate token, NOT reserve)
