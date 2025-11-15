@@ -184,9 +184,10 @@ contract OwnershipTransferTest is Test {
 
         // Act: Multi-sig executes upgrade
         vm.prank(signer1);
-        bytes memory upgradeCalldata = abi.encodeWithSelector(
-            FlashArbMainnetReady.upgradeTo.selector,
-            address(newImplementation)
+        bytes memory upgradeCalldata = abi.encodeWithSignature(
+            "upgradeToAndCall(address,bytes)",
+            address(newImplementation),
+            "" // Empty data - no initialization call needed
         );
         bool success = gnosisSafe.execTransaction(
             address(arb),
